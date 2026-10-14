@@ -39,5 +39,10 @@ def results_path(db_path: str | Path) -> Path:
     return Path(db_path).with_name("results.json")
 
 
+def cache_path(db_path: str | Path) -> Path:
+    """Extraction cache and lookups, kept next to the warehouse they feed."""
+    return Path(db_path).with_name("cache")
+
+
 def corpus_path(db_path: str | Path) -> Path:
     return Path(db_path).with_name("corpus")

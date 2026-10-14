@@ -38,6 +38,8 @@ class DocResult:
     legend: dict[str, str] = field(default_factory=dict)
     seconds: float = 0.0
     llm_calls: int = 0
+    complete: bool = True  # False when a scanned page couldn't be OCR'd
+    sha256: str | None = None  # of the PDF's bytes
 
     def summary(self) -> dict[str, Any]:
         methods = Counter(r.method for r in self.rows)
@@ -48,7 +50,7 @@ class DocResult:
             "accepted": sum(r.accepted for r in self.rows),
             "review": sum(not r.accepted for r in self.rows),
             "methods": dict(methods), "seconds": round(self.seconds, 2),
-            "llm_calls": self.llm_calls,
+            "llm_calls": self.llm_calls, "sha256": self.sha256,
         }  # fmt: skip
 
 
@@ -115,7 +117,8 @@ def extract_document(path: str | Path, doc_id: str | None = None, state: str | N
     doc_type = _doc_type(title, head, bool(table_pages))
     return DocResult(doc_id, str(path), state, _effective(" ".join(
         ln.text for p in pages[:1] for ln in p.lines)), title, doc_type, len(pages),
-        sum(p.ocr for p in pages), rows, leg.codes, time.perf_counter() - t0, calls)  # fmt: skip
+        sum(p.ocr for p in pages), rows, leg.codes, time.perf_counter() - t0, calls,
+        complete=not any(p.ocr_failed for p in pages))  # fmt: skip
 
 
 def _doc_type(title: str, head: str, has_tables: bool) -> str:

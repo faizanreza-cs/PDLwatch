@@ -1,4 +1,5 @@
 import json
+import re
 
 import httpx
 import yaml
@@ -28,7 +29,9 @@ def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404)
     if path == "/page.pdf":
         return httpx.Response(200, text="<html>moved</html>", headers={"content-type": "text/html"})
-    return httpx.Response(200, content=PDF, headers={"content-type": "application/pdf"})
+    # each address serves its own bytes, as real files do
+    body = PDF + request.url.path.encode()
+    return httpx.Response(200, content=body, headers={"content-type": "application/pdf"})
 
 
 def _sources(tmp_path, entries):
@@ -60,7 +63,11 @@ def test_fetch_outcomes_and_manifest(tmp_path):
     assert status[("VT", "https://ok.example.org/page.pdf")] == "not_pdf"
     assert status[("UT", "https://blocked.example.org/x.pdf")] == "blocked"
     files = sorted(p.name for p in (tmp_path / "out" / "pdfs").iterdir())
-    assert files == ["OH-ohio-pdl.pdf", "TX-PDL-July-2026.pdf", "TX-pdl-april-2026.pdf"]
+    assert [re.sub(r"-[0-9a-f]{8}\.pdf$", "", f) for f in files] == [
+        "OH-ohio-pdl",
+        "TX-PDL-July-2026",
+        "TX-pdl-april-2026",
+    ]  # stored by content
     manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())
     assert len(manifest) == len(got) and all(m["sha256"] for m in manifest if m["status"] == "ok")
 
@@ -94,3 +101,38 @@ def test_sources_file_is_well_formed():
         assert ("url" in e) != ("page" in e)
         assert (e.get("url") or e["page"]).startswith("https://")
     assert len({e["state"] for e in entries}) >= 15
+
+
+def test_unchanged_files_are_not_downloaded_and_new_versions_kept(tmp_path):
+    """A weekly run: 304 when nothing changed; a new version under the same address is kept
+    beside the old one, so the changes between them can be found."""
+    state = {"body": PDF + b" v1", "etag": '"v1"'}
+    seen = []
+
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        seen.append(request.headers.get("if-none-match"))
+        if request.headers.get("if-none-match") == state["etag"]:
+            return httpx.Response(304)
+        return httpx.Response(200, content=state["body"], headers={"etag": state["etag"]})
+
+    src = _sources(
+        tmp_path, [{"state": "OH", "title": "PDL", "url": "https://ok.example.org/pdl.pdf"}]
+    )
+    out = tmp_path / "out"
+
+    def run():
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        return realdata.fetch(src, out, client=client, delay=0)[0]
+
+    first = run()
+    assert first.status == "ok" and first.new and seen == [None]
+    again = run()
+    assert again.status == "not_modified" and again.file == first.file and seen[-1] == '"v1"'
+    state.update(body=PDF + b" v2", etag='"v2"')
+    newer = run()
+    assert newer.status == "ok" and newer.new and newer.file != first.file
+    assert sorted(p.name for p in (out / "pdfs").iterdir()) == sorted([first.file, newer.file])
+    ledger = realdata.read_ledger(out)
+    assert [e["status"] for e in ledger] == ["ok", "not_modified", "ok"]

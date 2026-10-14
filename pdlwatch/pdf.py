@@ -94,6 +94,7 @@ class Page:
     lines: list[Line]
     ocr: bool
     image: Any = None  # the cleaned page image, kept on OCR'd pages for re-reading cells
+    ocr_failed: bool = False  # a scanned page skipped because OCR wasn't available
 
     def ocr_region(self, x0: float, top: float, x1: float, bottom: float) -> str:
         """Re-OCR one cell as a single line of text (empty on digital pages)."""
@@ -202,6 +203,8 @@ def load(path: str | Path, ocr: bool = True) -> list[Page]:
                     warnings.warn(f"{Path(path).name} p.{n}: scanned page skipped, OCR "
                                   f"unavailable ({type(e).__name__})", stacklevel=2)  # fmt: skip
                     words = []
+                    pages.append(Page(n, pg.width, pg.height, [], True, img, ocr_failed=True))
+                    continue
                 pages.append(Page(n, pg.width, pg.height, _lines(words), True, img))
             else:
                 pages.append(Page(n, pg.width, pg.height, [], True))

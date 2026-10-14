@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from conftest import HAS_OCR
 
@@ -100,3 +102,31 @@ def test_an_unreadable_pdf_is_reported_and_the_rest_extracted(built, tmp_path):
     res = run_folder(tmp_path / "pdfs", s, workers=1)
     assert [f["doc_id"] for f in res["failed_documents"]] == ["broken"]
     assert res["data"]["rows"] >= len(good["rows"])
+
+
+def test_a_second_run_extracts_only_what_changed(built, tmp_path):
+    """Content-addressed cache: the same PDFs again cost nothing; a new one is extracted."""
+    from pdlwatch.config import Settings
+    from pdlwatch.pipeline import run_folder
+    from pdlwatch.warehouse import DuckDBWarehouse
+
+    docs = [d for d in built["truth"]["documents"] if not d["scanned"]][:3]
+    folder = tmp_path / "pdfs"
+    folder.mkdir()
+    for d in docs[:2]:
+        (folder / Path(d["file"]).name).write_bytes(
+            (built["root"] / "corpus" / d["file"]).read_bytes()
+        )
+    s = Settings(db_path=tmp_path / "real.duckdb")
+    first = run_folder(folder, s, workers=1)
+    rows = DuckDBWarehouse(s.db_path).query("SELECT * FROM formulary_rows ORDER BY doc_id, page")
+    again = run_folder(folder, s, workers=1)
+    assert first["cache"] == {"from_cache": 0, "extracted": 2}
+    assert again["cache"] == {"from_cache": 2, "extracted": 0}
+    same = DuckDBWarehouse(s.db_path).query("SELECT * FROM formulary_rows ORDER BY doc_id, page")
+    assert same.equals(rows)
+    new = docs[2]
+    (folder / Path(new["file"]).name).write_bytes(
+        (built["root"] / "corpus" / new["file"]).read_bytes()
+    )
+    assert run_folder(folder, s, workers=1)["cache"] == {"from_cache": 2, "extracted": 1}

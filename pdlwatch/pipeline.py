@@ -21,7 +21,8 @@ import duckdb
 import pandas as pd
 
 from pdlwatch import changes as changes_mod
-from pdlwatch.config import Settings, corpus_path, get_settings, results_path
+from pdlwatch.cache import DocCache, extractor_key, file_sha256
+from pdlwatch.config import Settings, cache_path, corpus_path, get_settings, results_path
 from pdlwatch.drugs import PRODUCTS
 from pdlwatch.evaluate import evaluate
 from pdlwatch.extract.document import DocResult, extract_document
@@ -41,13 +42,35 @@ def _extract(job: Job, llm: Any = None) -> DocResult:
         return DocResult(doc_id or Path(path).stem, path, state, None, detail, "error", 0, 0, [])
 
 
-def extract_all(jobs: list[Job], llm: Any = None, workers: int = 4) -> list[DocResult]:
+def extract_all(jobs: list[Job], llm: Any = None, workers: int = 4,
+                cache: DocCache | None = None) -> list[DocResult]:  # fmt: skip
     """Extract documents in parallel: processes for parsing and OCR, threads when an LLM is used
-    (provider clients don't cross process boundaries, and the calls are network-bound)."""
-    pool: Executor = (ThreadPoolExecutor(workers) if llm else
-                      ProcessPoolExecutor(workers, mp_context=mp.get_context("spawn")))  # fmt: skip
-    with pool as ex:
-        return list(ex.map(partial(_extract, llm=llm), jobs))
+    (provider clients don't cross process boundaries, and the calls are network-bound).
+
+    With a ``cache``, documents extracted before (same bytes, same extractor) are loaded instead,
+    so a run's cost follows the number of new PDFs, not the size of the archive.
+    """
+    shas = [file_sha256(path) for path, _, _ in jobs]
+    results: list[DocResult | None] = [None] * len(jobs)
+    if cache is not None:
+        for i, (path, doc_id, state) in enumerate(jobs):
+            results[i] = cache.get(shas[i], path, doc_id or Path(path).stem, state)
+    todo = [i for i, r in enumerate(results) if r is None]
+    if todo:
+        spawn = mp.get_context("spawn")
+        pool: Executor = (ThreadPoolExecutor(workers) if llm else
+                          ProcessPoolExecutor(workers, mp_context=spawn))  # fmt: skip
+        with pool as ex:
+            done = ex.map(partial(_extract, llm=llm), [jobs[i] for i in todo])
+            for i, res in zip(todo, done, strict=True):
+                res.sha256 = shas[i]
+                results[i] = res
+                if cache is not None:
+                    cache.put(shas[i], res)
+    out = [r for r in results if r is not None]
+    for r, sha in zip(out, shas, strict=True):
+        r.sha256 = sha
+    return out
 
 
 def tables(results: list[DocResult], source: str) -> dict[str, pd.DataFrame]:
@@ -155,18 +178,25 @@ def build(settings: Settings | None = None, seed: int = 7, llm: Any = None,
 
 def run_folder(folder: Path, settings: Settings | None = None,
                states: dict[str, str] | None = None, llm: Any = None, workers: int = 4,
-               source: str = "pdf folder") -> dict[str, Any]:  # fmt: skip
-    """Any folder of PDFs (real state PDLs). ``states`` maps file stem -> state code."""
+               source: str = "pdf folder", cache: bool = True) -> dict[str, Any]:  # fmt: skip
+    """Any folder of PDFs (real state PDLs). ``states`` maps file stem -> state code.
+
+    PDFs extracted by an earlier run (same bytes, same extractor) come from the cache next to
+    the warehouse, so a weekly run only pays for what changed.
+    """
     s = settings or get_settings()
     files = sorted(Path(folder).glob("**/*.pdf"))
     if not files:
         raise FileNotFoundError(f"no PDFs in {folder}")
     jobs: list[Job] = [(str(f), f.stem, (states or {}).get(f.stem)) for f in files]
+    store = DocCache(cache_path(s.db_path) / "docs", extractor_key(llm)) if cache else None
     t0 = time.perf_counter()
-    results = extract_all(jobs, llm, workers)
+    results = extract_all(jobs, llm, workers, store)
     tabs = tables(results, source)
     out = summary(results, tabs, time.perf_counter() - t0, source)
     out["extractor"] = "llm" if llm else "rules"
+    if store is not None:
+        out["cache"] = {"from_cache": store.hits, "extracted": len(jobs) - store.hits}
     write_duckdb(tabs, s.db_path)
     results_path(s.db_path).write_text(json.dumps(out, indent=1, default=str))
     return out

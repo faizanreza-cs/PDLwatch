@@ -3,8 +3,13 @@ the same extraction on them.
 
 Polite by design: one request per second per host, a User-Agent that names the project,
 robots.txt honoured, only ``application/pdf`` bodies kept, and a size cap. Every source's outcome
-(downloaded, not found, blocked by robots.txt, not a PDF) goes into ``manifest.json`` and the
-results, so a stale link shows up as a line to update rather than a silent gap.
+(downloaded, unchanged, not found, blocked by robots.txt, not a PDF) goes into ``manifest.json``
+and the results, so a stale link shows up as a line to update rather than a silent gap.
+
+Built to run every week: files are stored by content (``<state>-<name>-<sha8>.pdf``), so a new
+version posted under the same address never overwrites the old one, and every outcome is
+appended to ``ledger.jsonl``. The next run asks each server whether the file changed
+(``If-None-Match`` / ``If-Modified-Since``) and downloads only what did.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import json
 import re
 import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
@@ -36,11 +42,15 @@ class Fetched:
     title: str
     source: str  # the url or page from the sources file
     url: str | None  # the PDF actually requested
-    status: str  # ok | not_found | blocked | not_pdf | too_large | error
+    status: str  # ok | not_modified | not_found | blocked | not_pdf | too_large | error
     file: str | None = None
     bytes: int = 0
     sha256: str | None = None
     detail: str = ""
+    etag: str | None = None
+    last_modified: str | None = None
+    fetched_at: str = ""
+    new: bool = False  # content this archive hadn't seen: a new document or a new version
 
 
 class Politeness:
@@ -98,17 +108,40 @@ def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-")[:70]
 
 
-def _download(p: Politeness, state: str, title: str, source: str, url: str,
-              folder: Path) -> Fetched:  # fmt: skip
-    f = Fetched(state, title, source, url, "error")
+LEDGER = "ledger.jsonl"
+
+
+def read_ledger(out: Path) -> list[dict[str, Any]]:
+    """Every fetch outcome so far, oldest first."""
+    path = out / LEDGER
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _download(p: Politeness, state: str, title: str, source: str, url: str, folder: Path,
+              previous: dict[str, Any] | None, by_sha: dict[str, str]) -> Fetched:  # fmt: skip
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    f = Fetched(state, title, source, url, "error", fetched_at=now)
     if not p.allowed(url):
         f.status = "blocked"
         f.detail = "disallowed by robots.txt"
         return f
+    headers = {}
+    if previous:  # we hold this file: ask the server whether it changed
+        if previous.get("etag"):
+            headers["If-None-Match"] = previous["etag"]
+        if previous.get("last_modified"):
+            headers["If-Modified-Since"] = previous["last_modified"]
     try:
-        r = p.get(url)
+        r = p.get(url, headers=headers)
     except httpx.HTTPError as e:
         f.detail = type(e).__name__
+        return f
+    if r.status_code == 304 and previous:
+        f.status, f.file, f.sha256 = "not_modified", previous["file"], previous["sha256"]
+        f.bytes, f.etag = previous.get("bytes", 0), previous.get("etag")
+        f.last_modified = previous.get("last_modified")
         return f
     if r.status_code != 200:
         f.status, f.detail = "not_found", f"HTTP {r.status_code}"
@@ -120,21 +153,33 @@ def _download(p: Politeness, state: str, title: str, source: str, url: str,
     if not body.startswith(b"%PDF"):
         f.status, f.detail = "not_pdf", r.headers.get("content-type", "")
         return f
-    name = f"{state}-{_slug(Path(unquote(urlparse(url).path)).stem)}.pdf"
-    (folder / name).write_bytes(body)
-    f.status, f.file, f.bytes = "ok", name, len(body)
-    f.sha256 = hashlib.sha256(body).hexdigest()
+    sha = hashlib.sha256(body).hexdigest()
+    name = by_sha.get(f"{state}:{sha}")  # a state's same bytes under any address: stored once
+    if name is None:
+        name = f"{state}-{_slug(Path(unquote(urlparse(url).path)).stem)}-{sha[:8]}.pdf"
+        (folder / name).write_bytes(body)
+        by_sha[f"{state}:{sha}"] = name
+        f.new = True
+    f.status, f.file, f.bytes, f.sha256 = "ok", name, len(body), sha
+    f.etag, f.last_modified = r.headers.get("etag"), r.headers.get("last-modified")
     return f
 
 
 def fetch(sources: Path, out: Path, states: list[str] | None = None,
           client: httpx.Client | None = None, delay: float = 1.0) -> list[Fetched]:  # fmt: skip
-    """Download every source (or those of ``states``) into ``out/pdfs``; write a manifest."""
+    """Download every source (or those of ``states``) into ``out/pdfs``: new files only, kept
+    by content. Writes this run's ``manifest.json`` and appends to ``ledger.jsonl``."""
     entries = yaml.safe_load(sources.read_text())
     if states:
         entries = [e for e in entries if e["state"] in states]
     folder = out / "pdfs"
     folder.mkdir(parents=True, exist_ok=True)
+    previous: dict[str, dict[str, Any]] = {}  # url -> its latest outcome with a file we hold
+    by_sha: dict[str, str] = {}
+    for e in read_ledger(out):
+        if e.get("file") and (folder / e["file"]).exists():
+            previous[e["url"]] = e
+            by_sha[f"{e['state']}:{e['sha256']}"] = e["file"]
     own = client is None
     client = client or httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=60,
                                     follow_redirects=True)  # fmt: skip
@@ -166,13 +211,17 @@ def fetch(sources: Path, out: Path, states: list[str] | None = None,
                 if url in seen:
                     continue
                 seen.add(url)
-                f = _download(p, state, title, e.get("url") or e["page"], url, folder)
+                f = _download(p, state, title, e.get("url") or e["page"], url, folder,
+                              previous.get(url), by_sha)  # fmt: skip
                 results.append(f)
-                print(f"[fetch] {state} {f.status:9} {url} {f.detail}", flush=True)
+                print(f"[sync] {state} {f.status:12} {url} {f.detail}", flush=True)
     finally:
         if own:
             client.close()
     (out / "manifest.json").write_text(json.dumps([asdict(f) for f in results], indent=1))
+    with (out / LEDGER).open("a") as fh:
+        for f in results:
+            fh.write(json.dumps(asdict(f)) + "\n")
     return results
 
 
@@ -183,19 +232,21 @@ def fetch_and_build(sources: Path, out: Path, states: list[str] | None = None, l
 
     s = settings or get_settings()
     got = fetch(sources, out, states)
-    ok = [f for f in got if f.status == "ok"]
-    by_file = {Path(f.file).stem: f.state for f in ok if f.file}
+    held = [f for f in got if f.status in {"ok", "not_modified"}]
+    # every version ever fetched stays in the folder: states for all of them, from the ledger
+    by_file = {Path(e["file"]).stem: e["state"] for e in read_ledger(out) if e.get("file")}
     res = run_folder(out / "pdfs", s, by_file, llm=llm, source="state Medicaid PDLs (public PDFs)")
     statuses: dict[str, int] = {}
     for f in got:
         statuses[f.status] = statuses.get(f.status, 0) + 1
     res["fetch"] = {
         "sources": len(yaml.safe_load(sources.read_text())),
-        "pdfs_downloaded": len(ok),
-        "states": sorted({f.state for f in ok}),
-        "megabytes": round(sum(f.bytes for f in ok) / 1e6, 1),
+        "pdfs_current": len(held),
+        "new_files": sum(f.new for f in got),
+        "states": sorted({f.state for f in held}),
+        "megabytes": round(sum(f.bytes for f in held) / 1e6, 1),
         "outcomes": statuses,
-        "failed": [asdict(f) for f in got if f.status != "ok"],
+        "failed": [asdict(f) for f in got if f.status not in {"ok", "not_modified"}],
     }
     results_path(s.db_path).write_text(json.dumps(res, indent=1, default=str))
     return res

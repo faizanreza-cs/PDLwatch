@@ -21,7 +21,7 @@ from pdlwatch.config import Settings, get_settings
 # tables the API, the agent and SQL may read, with their columns
 SCHEMA: dict[str, tuple[str, ...]] = {
     "documents": ("doc_id", "state", "state_name", "title", "doc_type", "effective", "pages",
-                  "ocr_pages", "rows", "accepted", "review", "source", "file"),
+                  "ocr_pages", "rows", "accepted", "review", "source", "file", "sha256"),
     "formulary_rows": ("doc_id", "state", "effective", "page", "method", "drug_text",
                        "drug_class", "product", "ingredient", "kind", "status", "tier", "pa",
                        "st", "ql", "ql_detail", "bvg", "ocr", "confidence", "accepted",
