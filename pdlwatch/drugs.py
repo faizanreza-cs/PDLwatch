@@ -18,13 +18,27 @@ from functools import lru_cache
 
 from rapidfuzz import fuzz, process
 
+from pdlwatch import rxnorm
+
 
 @dataclass(frozen=True)
 class Product:
     name: str  # as a PDL prints it: brand name, or generic name in lower case
     ingredient: str
     kind: str  # "brand" | "generic"
-    drug_class: str
+    drug_class: str  # empty for an RxNorm name: the document's own class heading is used
+    rxcui: str | None = None  # RxNorm concept id, from the RxNorm lexicon when one is loaded
+
+
+def _from_rxnorm(entry: dict[str, str]) -> Product:
+    return Product(entry["name"], entry["ingredient"] or entry["name"].lower(), entry["kind"], "",
+                   entry["rxcui"])  # fmt: skip
+
+
+def rxcui(name: str) -> str | None:
+    """The RxCUI of a dictionary product's name, when the RxNorm lexicon is loaded."""
+    entry = rxnorm.exact([normalise(name)])
+    return entry["rxcui"] if entry else None
 
 
 # class -> [(name, ingredient)]; a name in lower case is a generic (or an unbranded biologic)
@@ -310,21 +324,32 @@ def match_product(text: str, drug_class: str | None = None) -> Match:
     for o in outside:
         if o in idx:
             return Match(idx[o], 100.0, normalise(text))
+    rx_outside = rxnorm.exact(outside)  # an RxNorm brand outside: "Advair HFA (fluticasone/...)"
     found: list[Product] = []
     for cand in _candidates(text):
         n = normalise(cand)
         if n in idx:
             found.append(idx[n])
-    if found:
+    if found and not (rx_outside and rx_outside["kind"] == "brand"):
         brands = [p for p in found if p.kind == "brand"]
         return Match((brands or found)[0], 100.0, normalise(text))
+    if rx_outside:
+        return Match(_from_rxnorm(rx_outside), 100.0, normalise(text))
+    rx = rxnorm.exact([normalise(c) for c in _candidates(text)])
+    if rx:
+        return Match(_from_rxnorm(rx), 100.0, normalise(text))
     n = normalise(text)
     if not n:
         return Match(None, 0.0, n)
-    for hay in dict.fromkeys([*outside, n, *(normalise(v) for v in variants)]):
+    hays = list(dict.fromkeys([*outside, n, *(normalise(v) for v in variants)]))
+    for hay in hays:
         inside = _contained(hay, _names_longest_first()) if hay else None
         if inside:
             return Match(idx[inside], 95.0, n)
+    for hay in hays:
+        entry = rxnorm.contained(hay) if hay else None
+        if entry:
+            return Match(_from_rxnorm(entry), 95.0, n)
     for cand in _candidates(text):  # an OCR misread: "Otezia", "Mavenciad", "Jormay PM"
         folded = _folded_index().get(fold(normalise(cand)))
         if folded is not None:

@@ -24,7 +24,7 @@ from pdlwatch import changes as changes_mod
 from pdlwatch import history
 from pdlwatch.cache import DocCache, extractor_key, file_sha256
 from pdlwatch.config import Settings, cache_path, corpus_path, get_settings, results_path
-from pdlwatch.drugs import PRODUCTS
+from pdlwatch.drugs import PRODUCTS, rxcui
 from pdlwatch.evaluate import evaluate
 from pdlwatch.extract.document import DocResult, date_hint, extract_document
 from pdlwatch.synth import corpus as synth_corpus
@@ -74,6 +74,22 @@ def extract_all(jobs: list[Job], llm: Any = None, workers: int = 4,
     return out
 
 
+def _products(rows: pd.DataFrame) -> pd.DataFrame:
+    """The dictionary's products, and every product found through RxNorm in these documents
+    (its class is the one the documents file it under most often)."""
+    known = pd.DataFrame([{"product": p.name, "ingredient": p.ingredient, "kind": p.kind,
+                           "drug_class": p.drug_class, "rxcui": rxcui(p.name)}
+                          for p in PRODUCTS])  # fmt: skip
+    found = rows[rows["product"].notna() & ~rows["product"].isin(known["product"])]
+    if found.empty:
+        return known
+    found = found.assign(drug_class=found["drug_class"].fillna(""))
+    cls = found.groupby("product")["drug_class"].agg(lambda s: s.mode().iloc[0])
+    first = found.drop_duplicates("product").set_index("product")
+    extra = first[["ingredient", "kind", "rxcui"]].assign(drug_class=cls).reset_index()
+    return pd.concat([known, extra[list(known.columns)]], ignore_index=True)
+
+
 def tables(results: list[DocResult], source: str) -> dict[str, pd.DataFrame]:
     docs = pd.DataFrame([{**r.summary(), "source": source} for r in results])
     docs["state_name"] = docs["state"].map(STATES)
@@ -95,8 +111,7 @@ def tables(results: list[DocResult], source: str) -> dict[str, pd.DataFrame]:
         "review_queue": review[list(SCHEMA["review_queue"])],
         "changes": changes_mod.detect(rows, docs),
         "drug_access_history": history.build(rows, docs),
-        "products": pd.DataFrame([{"product": p.name, "ingredient": p.ingredient,
-                                   "kind": p.kind, "drug_class": p.drug_class} for p in PRODUCTS]),
+        "products": _products(rows),
         "states": pd.DataFrame({"state": list(STATES), "state_name": list(STATES.values())}),
     }  # fmt: skip
     return out

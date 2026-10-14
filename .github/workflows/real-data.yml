@@ -33,6 +33,7 @@ jobs:
     timeout-minutes: 90
     env:
       PDLWATCH_DB: data/real/pdlwatch.duckdb
+      PDLWATCH_RXNORM: data/real/cache/rxnorm.json
       PDLWATCH_PROVIDER: ${{ inputs.llm && 'anthropic' || 'mock' }}
       PDLWATCH_MODEL: ${{ vars.PDLWATCH_MODEL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -61,6 +62,12 @@ jobs:
             data/real/cache
           key: real-data-${{ github.run_id }}
           restore-keys: real-data-
+      # drug names the dictionary doesn't know are read against RxNorm (NLM's monthly
+      # prescribable release: free, no license); without it they go to review
+      - name: RxNorm names
+        run: |
+          .venv/bin/python -m pdlwatch.cli rxnorm --out "$PDLWATCH_RXNORM" \
+            || echo "::warning::RxNorm release unavailable; names outside the dictionary go to review"
       - name: Sync and extract
         run: |
           args=()

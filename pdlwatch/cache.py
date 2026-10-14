@@ -48,10 +48,14 @@ def _code_hash() -> str:
 
 
 def extractor_key(llm: Any = None) -> str:
-    """What the cached rows depend on besides the file: code, OCR engine, LLM model."""
+    """What the cached rows depend on besides the file: code, OCR engine, LLM model and the
+    RxNorm lexicon."""
+    from pdlwatch import rxnorm
+
     prov = getattr(llm, "provider", None)
     model = f"{getattr(prov, 'name', '')}:{getattr(prov, 'model', '')}" if llm else ""
-    return hashlib.sha256(f"{_code_hash()}|{model}".encode()).hexdigest()[:16]
+    key = f"{_code_hash()}|{model}|{rxnorm.fingerprint()}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 class DocCache:

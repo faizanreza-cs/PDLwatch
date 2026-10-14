@@ -18,7 +18,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from pdlwatch.drugs import match_class, match_product, normalise
+from pdlwatch.drugs import match_class, match_product, normalise, rxcui
 from pdlwatch.extract.layout import RawRow
 from pdlwatch.extract.legend import DEFAULT_STATUS, Legend
 
@@ -57,6 +57,7 @@ class Row:
     review_reasons: list[str] = field(default_factory=list)
     accepted: bool = True
     y: float | None = None  # top of the source line on the page (tables and lists)
+    rxcui: str | None = None  # RxNorm concept id of the product, when the lexicon is loaded
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -179,7 +180,8 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None) -> Row:
     row = Row(doc_id, state, r.page, r.method, text, cls or r.drug_class,
               m.product.name if m.product else None, m.product.ingredient if m.product else None,
               m.product.kind if m.product else None, m.score, None, ocr=r.ocr, ocr_conf=r.conf,
-              evidence=r.evidence, y=round(r.y, 1))  # fmt: skip
+              evidence=r.evidence, y=round(r.y, 1),
+              rxcui=(m.product.rxcui or rxcui(m.product.name)) if m.product else None)  # fmt: skip
     roles = r.roles
     req = _requirements(cells.get("req", ""))
     if r.list_role:

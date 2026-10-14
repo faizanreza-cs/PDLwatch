@@ -1,5 +1,5 @@
 """Command line: ``pdlwatch corpus | build | extract | drug | state | changes | review | query |
-sql | ask | charts | export-powerbi | load | sync | audit | inspect``."""
+sql | ask | charts | export-powerbi | load | sync | audit | inspect | rxnorm``."""
 
 from __future__ import annotations
 
@@ -84,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     au.add_argument("--seed", type=int, default=1)
     au.add_argument("--state")
     au.add_argument("--pdfs", help="folder of the PDFs (default: the synthetic corpus)")
+    rx = sub.add_parser("rxnorm", help="build the RxNorm name lexicon (NLM's free monthly release)")
+    rx.add_argument("--out", type=Path, default=Path("data/real/cache/rxnorm.json"))
+    rx.add_argument("--zip", type=Path, help="a release zip already downloaded")
     ins = sub.add_parser("inspect", help="show how the parser reads pages of a PDF")
     ins.add_argument("pdf", type=Path)
     ins.add_argument("--pages", required=True, help="comma-separated page numbers, e.g. 3,52")
@@ -118,6 +121,19 @@ def main(argv: list[str] | None = None) -> int:
         print(_summary(res))
         return 0
 
+    if args.cmd == "rxnorm":
+        from collections import Counter
+
+        from pdlwatch import rxnorm
+
+        lex = rxnorm.build(args.zip or rxnorm.download(args.out.parent / "rxnorm"))
+        rxnorm.save(lex, args.out)
+        kinds = Counter(v["kind"] for v in lex["names"].values())
+        print(
+            f"{len(lex['names'])} names from {lex['source']} ({kinds['brand']} brands, "
+            f"{kinds['generic']} ingredients) -> {args.out}; set PDLWATCH_RXNORM to use them"
+        )
+        return 0
     if args.cmd == "inspect":
         from pdlwatch.audit import inspect
 
