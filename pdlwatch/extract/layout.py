@@ -359,12 +359,16 @@ def _cells(line: Line, layout: Layout) -> dict[str, Cell]:
 
 def _band(line: Line, page: Page) -> str | None:
     """Where a line sits among the page's furniture: "number" (a page number), "top" (the title
-    band), "bottom" (the footer band), or None (the body)."""
-    if _FOOTER.match(line.text.strip()):
+    band), "bottom" (the footer band), or None (the body). A number alone on its line in the
+    body is a page number only when it is this page's (a tier "1" set apart is a cell)."""
+    text = line.text.strip()
+    bottom, top = line.bottom > _BOTTOM * page.height, line.top < _TOP * page.height
+    if _FOOTER.match(text) and (bottom or top or not text.isdigit()
+                                or abs(int(text) - page.number) <= 2):  # fmt: skip
         return "number"
-    if line.bottom > _BOTTOM * page.height:
+    if bottom:
         return "bottom"
-    if line.top < _TOP * page.height:
+    if top:
         return "top"
     return None
 
@@ -415,9 +419,14 @@ def _status_value(line: Line, new: Layout, current: Layout) -> bool:
 
 
 def _foreign_header(line: Line) -> bool:
-    """A header row of another kind of table: it starts with a drug or class column and the
-    rest are column titles this parser has no role for."""
-    if len(line.phrases) < 2 or role(line.phrases[0].text) not in {"drug", "class"}:
+    """A header row of another kind of table: it starts with a drug or class column ("Drug
+    Name", "Drug / Class Name") and the rest are column titles this parser has no role for
+    ("Step Therapy (ST) Parameters", "Dose Optimization Limitations")."""
+    first = line.phrases[0].text if line.phrases else ""
+    named = role(first) in {"drug", "class"} or bool(
+        re.fullmatch(r"(drug|medication|product)( ?/ ?class)?( name)?", first.lower().strip())
+    )
+    if len(line.phrases) < 2 or not named:
         return False
     rest = line.phrases[1:]
     return all(role(p.text) is None and len(p.text.split()) <= 5 and p.text[:1].isupper()

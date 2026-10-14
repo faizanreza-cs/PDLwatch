@@ -20,7 +20,7 @@ import pandas as pd
 
 from pdlwatch.extract import layout
 from pdlwatch.extract.document import effective_source
-from pdlwatch.pdf import Line, Page, load
+from pdlwatch.pdf import Line, Page, file_dates, load
 from pdlwatch.warehouse import get_warehouse
 
 
@@ -68,6 +68,7 @@ def inspect(path: str, pages: list[int], width: int = 48) -> list[str]:
         d, origin, words = effective_source(doc)
         where = f" ({origin}) from: ...{words}..." if d else ""
         out.append(f"effective: {d or 'not found'}{where}")
+        out.append(f"file dates: {file_dates(path)}")
     for n in wanted:
         pg = doc[n - 1]
         out.append(f"== {path.rsplit('/', 1)[-1]} p.{n} ({pg.width:.0f} x {pg.height:.0f} pt"

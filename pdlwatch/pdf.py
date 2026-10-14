@@ -183,21 +183,28 @@ def ocr_words(image: Any, scale: float) -> list[Word]:
     return out
 
 
-def modified(path: str | Path) -> str | None:
-    """The date the PDF file was last saved, from its metadata (ModDate, else CreationDate),
-    as YYYY-MM-DD; None when it has none."""
+def file_dates(path: str | Path) -> dict[str, str]:
+    """The dates in a PDF's metadata ({"ModDate": "2026-09-30", "CreationDate": ...}), as
+    YYYY-MM-DD; empty when it has none."""
     import re
 
     try:
         with pdfplumber.open(str(path)) as pdf:
             meta = pdf.metadata or {}
-    except Exception:  # a damaged file: no date rather than no extraction
-        return None
+    except Exception:  # a damaged file: no dates rather than no extraction
+        return {}
+    out = {}
     for key in ("ModDate", "CreationDate"):
         m = re.match(r"(?:D:)?(\d{4})(\d{2})(\d{2})", str(meta.get(key) or ""))
         if m and "1990" < m.group(1) < "2100":
-            return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-    return None
+            out[key] = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return out
+
+
+def modified(path: str | Path) -> str | None:
+    """The date the PDF file was last saved (ModDate, else CreationDate); None without one."""
+    dates = file_dates(path)
+    return dates.get("ModDate") or dates.get("CreationDate")
 
 
 def load(path: str | Path, ocr: bool = True) -> list[Page]:

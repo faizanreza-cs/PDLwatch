@@ -238,7 +238,7 @@ role for the agent and API), and the repo carries starter kits for
 
 ## Tests and evals
 
-**163 offline tests** cover table and list parsing on hand-built pages (including layouts
+**166 offline tests** cover table and list parsing on hand-built pages (including layouts
 copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns),
 legends and Medicaid rules, review reasons for scans, effective dates from titles and file names,
 change detection, point-in-time history and alerts, the RxNorm lexicon on a sample release, the

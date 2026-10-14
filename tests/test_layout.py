@@ -376,3 +376,27 @@ def test_a_table_under_centred_headers_in_the_title_band():
     rows, _ = layout.parse([page])
     want = [(d, st) for d, _, st, _ in rows_]
     assert [(r.cells["drug"], r.cells["status"]) for r in rows] == want
+
+
+def test_a_criteria_table_after_the_list_is_not_read_as_the_list():
+    """New York ends its PDL with "Drug / Class Name | Step Therapy (ST) Parameters | ..."."""
+    page = _page(
+        _line(100, ("Preferred Drugs", 81), ("Non-Preferred Drugs", 248)),
+        _line(115, ("Repatha", 81), ("Praluent", 248)),
+        _line(130, ("Drug / Class Name", 73), ("Step Therapy (ST) Parameters", 220)),
+        _line(145, ("fezolinetant (Veozah)", 63), ("Trial of one hormone", 239)),
+    )
+    rows, _ = layout.parse([page])
+    assert [r.cells["drug"] for r in rows] == ["Repatha", "Praluent"]
+
+
+def test_a_number_alone_in_a_table_is_a_cell_not_a_page_number():
+    """Georgia sets the tier on its own line beside a name that wraps."""
+    page = Page(8, 612, 792, [
+        _line(100, ("Drug Name", 34), ("Tier", 176)),
+        _line(115, ("Ozempic", 34)),
+        _line(121, ("2", 184)),
+        _line(760, ("8", 300)),  # the page number, in the footer band
+    ], False)  # fmt: skip
+    rows, _ = layout.parse([page])
+    assert [(r.cells["drug"], r.cells.get("tier")) for r in rows] == [("Ozempic", "2")]

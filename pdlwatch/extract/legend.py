@@ -53,6 +53,8 @@ class Legend:
     tiers: dict[int, str] = field(default_factory=dict)  # tier -> status role
     text: str = ""
     lost: set[str] = field(default_factory=set)  # defined, but OCR lost the code ("= Step ...")
+    notes: dict[str, str] = field(default_factory=dict)  # symbols defined as something else
+    # ("‡ = Age restrictions apply"): known, but not a PA, ST, QL or status
 
     def status(self, raw: str) -> str | None:
         """A status cell ("NP", "Non-PDL", "Yes") as preferred / non_preferred / not_covered."""
@@ -97,6 +99,8 @@ def parse(text: str) -> Legend:
         code = " ".join(m.group("code").lower().split())
         role = meaning_role(m.group("meaning"))
         if role is None:
+            if not code.isalnum():  # a symbol: what it means is known, and it is no flag
+                leg.notes.setdefault(code, m.group("meaning").strip())
             continue
         t = re.fullmatch(r"(?:tier\s*|t)(\d)", code)
         if t and role in {"preferred", "non_preferred", "not_covered"}:

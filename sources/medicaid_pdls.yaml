@@ -117,6 +117,14 @@
   page: https://www.pa.gov/agencies/dhs/resources/pharmacy-services/preferred-drug-list.html
   match: "(?i)pdl|preferred"
   max: 3
+- state: PA
+  title: Pennsylvania statewide PDL site (papdl.com)
+  page: https://papdl.com/
+  match: "(?i)statewide|pdl"
+  max: 2
+- state: PA
+  title: Pennsylvania statewide PDL, January 2024 (v5)
+  url: https://www.dhs.pa.gov/providers/Providers/Documents/Pharmacy%20Services/Penn-Statewide-PDL-2024-v5.pdf
 
 - state: TX
   title: Texas Vendor Drug Program PDL page

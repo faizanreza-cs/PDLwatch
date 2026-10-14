@@ -123,7 +123,7 @@ _SYMBOL_RUN = re.compile(rf"(?<!\S)[{re.escape(_SYMBOLS)}]+(?!\S)")
 def undefined_symbols(text: str, legend: Legend) -> set[str]:
     """Footnote symbols in a name that the document's legend doesn't define: what they mean
     (a PA, a limit, a carve-out) is unknown, so the row's flags can't be trusted."""
-    markers = legend.markers()
+    markers = {**legend.notes, **legend.markers()}
     out: set[str] = set()
     for run in re.findall(rf"[{re.escape(_SYMBOLS)}]+", text):
         if run in markers:

@@ -82,3 +82,12 @@ def test_a_preferred_drug_list_without_a_status_column_lists_preferred_drugs():
     assert _default_status(head, [raw("drug", "class", "pa")]) == "preferred"
     assert _default_status(head, [raw("drug", "pa"), raw("drug", "status")]) is None
     assert _default_status("Prior Authorization Drug List", [raw("drug", "pa")]) is None
+
+
+def test_a_symbol_explained_as_something_else_is_known():
+    from pdlwatch.extract.rows import undefined_symbols
+
+    leg = parse("* = Prior authorization required. ‡ = Age restrictions apply.")
+    assert leg.notes == {"‡": "Age restrictions apply"} and leg.markers() == {"*": "pa"}
+    assert undefined_symbols("risperidone ‡ TABLET", leg) == set()
+    assert undefined_symbols("risperidone † TABLET", leg) == {"†"}
