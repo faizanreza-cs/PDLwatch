@@ -120,6 +120,21 @@ def _symbols(run: str, markers: dict[str, str]) -> set[str]:
 _SYMBOL_RUN = re.compile(rf"(?<!\S)[{re.escape(_SYMBOLS)}]+(?!\S)")
 
 
+def undefined_symbols(text: str, legend: Legend) -> set[str]:
+    """Footnote symbols in a name that the document's legend doesn't define: what they mean
+    (a PA, a limit, a carve-out) is unknown, so the row's flags can't be trusted."""
+    markers = legend.markers()
+    out: set[str] = set()
+    for run in re.findall(rf"[{re.escape(_SYMBOLS)}]+", text):
+        if run in markers:
+            continue
+        if len(set(run)) == 1:
+            out.add(run)  # "**" when only "*" is defined: not read as "*"
+        else:
+            out |= {c for c in run if c not in markers}  # "*†": each on its own
+    return out
+
+
 def strip_markers(text: str, legend: Legend) -> tuple[str, set[str]]:
     """'Ozempic CC QL' -> ('Ozempic', {'pa', 'ql'}) using the document's legend; footnote symbols
     are read wherever they stand ("codeine sulfate * TABLET", "sumatriptan**")."""
@@ -202,12 +217,16 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None,
               rxcui=(m.product.rxcui or rxcui(m.product.name)) if m.product else None)  # fmt: skip
     roles = r.roles
     req = _requirements(cells.get("req", ""))
+    status_pa = False  # "PREFERRED_WITH_PA", "Preferred with PA" written in the status cell
     if r.list_role:
         row.status = "preferred" if r.list_role == "preferred_pa" else r.list_role
+        status_pa = r.list_role == "preferred_pa"
     elif "tier" in cells:
         row.tier, row.status = legend.tier(cells["tier"])
     elif "status" in cells:
         row.status = legend.status(cells["status"])
+        status_pa = bool(re.search(r"\bwith (pa|prior auth)", cells["status"].replace("_", " "),
+                                   re.I))  # fmt: skip
         code = cells["status"].strip().lower()
         defined = {c for c, role in legend.codes.items() if role in DEFAULT_STATUS}
         if r.ocr and defined and len(code) <= 4 and code not in defined:
@@ -227,7 +246,7 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None,
             value = _flag(cells[f])
             if value is None:
                 unreadable.append(f)
-        if req.get(f) or f in markers or (f == "pa" and r.list_role == "preferred_pa"):
+        if req.get(f) or f in markers or (f == "pa" and status_pa):
             value = True
         if value is None and known and f not in unreadable:
             value = False
@@ -244,6 +263,8 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None,
                 setattr(row, f, True)
         row.ql_detail = row.ql_detail or loose.get("ql_detail")
         row.review_reasons.append("flags in a column without a known header")
+    if not r.ocr and undefined_symbols(cells.get("drug", ""), legend):
+        row.review_reasons.append("footnote symbol not in the legend")
     if ocr_symbols and legend.markers():
         # OCR turns daggers into letters ("Zepatiertt") and can't tell † from ‡ reliably
         row.review_reasons.append("footnote symbol read by OCR")

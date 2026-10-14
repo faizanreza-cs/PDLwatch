@@ -89,13 +89,20 @@ class Politeness:
             self._last[host] = time.monotonic()
 
 
+def _document_link(url: str) -> bool:
+    """A link to a PDF: a ".pdf" address, or a content system's file link that names no type
+    ("/media/41358/download"); what comes back is checked to be a PDF anyway."""
+    path = urlparse(url).path.lower()
+    return ".pdf" in url.lower() or path.endswith("/download")
+
+
 def discover(html: str, base: str, pattern: str, limit: int) -> list[str]:
     """PDF links on a page whose address or link text match ``pattern``, in page order."""
     out: list[str] = []
     for href, text in _LINK.findall(html):
         url = urljoin(base, href.strip())
         label = " ".join(_TAGS.sub(" ", text).split())
-        if ".pdf" not in url.lower() or not re.search(pattern, url + " " + label):
+        if not _document_link(url) or not re.search(pattern, url + " " + label):
             continue
         if url not in out:
             out.append(url)
@@ -156,7 +163,10 @@ def _download(p: Politeness, state: str, title: str, source: str, url: str, fold
     sha = hashlib.sha256(body).hexdigest()
     name = by_sha.get(f"{state}:{sha}")  # a state's same bytes under any address: stored once
     if name is None:
-        name = f"{state}-{_slug(Path(unquote(urlparse(url).path)).stem)}-{sha[:8]}.pdf"
+        stem = Path(unquote(urlparse(url).path)).stem
+        if stem.lower() in {"download", "file", "view", "index"} or stem.isdigit():
+            stem = title  # "/media/41358/download" says nothing: the source's title does
+        name = f"{state}-{_slug(stem)}-{sha[:8]}.pdf"
         (folder / name).write_bytes(body)
         by_sha[f"{state}:{sha}"] = name
         f.new = True

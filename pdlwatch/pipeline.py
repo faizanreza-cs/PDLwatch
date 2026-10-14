@@ -12,7 +12,7 @@ import multiprocessing as mp
 import time
 from collections import Counter
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -27,6 +27,7 @@ from pdlwatch.config import Settings, cache_path, corpus_path, get_settings, res
 from pdlwatch.drugs import PRODUCTS, rxcui
 from pdlwatch.evaluate import evaluate
 from pdlwatch.extract.document import DocResult, date_hint, extract_document
+from pdlwatch.pdf import modified
 from pdlwatch.synth import corpus as synth_corpus
 from pdlwatch.synth.states import STATES
 from pdlwatch.warehouse import SCHEMA, reset_cache
@@ -191,12 +192,25 @@ def build(settings: Settings | None = None, seed: int = 7, llm: Any = None,
     return out
 
 
+_LIVING = 730  # days: a file saved this long after the date it prints is a living list
+
+
 def date_hints(results: list[DocResult], hints: dict[str, dict[str, str]]) -> None:
     """A date for documents that don't print one: from the source's title, else the file's
-    original name ("20260701_UPDL...", "pdl10242025"). Each says where its date came from."""
+    original name ("20260701_UPDL...", "pdl10242025"). Each says where its date came from.
+
+    A list updated in place under one title keeps the date it began ("Apple Health Preferred
+    Drug List, Effective June 1, 2020", saved in 2026): when the file was saved more than two
+    years after the date it prints, this version is dated by the file instead.
+    """
     for r in results:
         h = hints.get(r.doc_id, {})
         r.first_seen = h.get("first_seen") or r.first_seen
+        if r.effective and r.doc_type != "error":
+            saved = modified(r.path)
+            gap = (date.fromisoformat(saved) - date.fromisoformat(r.effective)).days if saved else 0
+            if saved and gap > _LIVING:
+                r.effective, r.effective_from = saved, "file date"
         if r.effective or r.doc_type == "error":
             continue
         for origin, text in (("source title", h.get("title", "")),

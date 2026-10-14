@@ -116,3 +116,19 @@ def test_a_preferred_with_pa_column_and_a_default_status():
     assert from_raw(table, parse(""), "d", "FL").status is None
     r = from_raw(table, parse(""), "d", "FL", default_status="preferred")
     assert (r.status, r.pa) == ("preferred", False) and "only preferred" in r.evidence
+
+
+def test_a_footnote_symbol_the_legend_does_not_define_goes_to_review():
+    leg = parse("* = Prior authorization required.")
+    r = score([from_raw(_raw("Xarelto ‡", "preferred"), leg, "d", "OR")])[0]
+    assert r.product == "Xarelto" and not r.accepted
+    assert "footnote symbol not in the legend" in r.review_reasons
+    ok = score([from_raw(_raw("Xarelto *", "preferred"), leg, "d", "OR")])[0]
+    assert ok.accepted and ok.pa
+
+
+def test_preferred_with_pa_written_in_the_status_cell():
+    raw = RawRow(1, "table", {"drug": "Strattera", "status": "PREFERRED_WITH_PA"}, None, None,
+                 False, 100.0, "x", frozenset({"drug", "status"}))  # fmt: skip
+    r = from_raw(raw, parse(""), "d", "IL")
+    assert (r.status, r.pa) == ("preferred", True)

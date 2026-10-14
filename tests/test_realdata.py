@@ -14,6 +14,8 @@ LANDING = """<html><body>
 <a href="https://other.example.org/archive/pdl-april-2026.pdf"><span>PDL</span> archive</a>
 <a href="/files/PDL%20July%202026.pdf">same file again</a>
 <a href="/about.html">About the PDL</a>
+<a href="/media/41358/download">Preferred Drug List, Q2 2026</a>
+<a href="/media/41359/download">Pharmacy newsletter</a>
 </body></html>"""
 
 
@@ -44,7 +46,7 @@ def test_fetch_outcomes_and_manifest(tmp_path):
     src = _sources(tmp_path, [
         {"state": "OH", "title": "direct", "url": "https://ok.example.org/files/ohio%20pdl.pdf"},
         {"state": "TX", "title": "landing page", "page": "https://ok.example.org/pdl",
-         "match": "(?i)pdl", "max": 3},
+         "match": "(?i)pdl|preferred drug list", "max": 3},
         {"state": "IA", "title": "gone", "url": "https://ok.example.org/missing.pdf"},
         {"state": "VT", "title": "html", "url": "https://ok.example.org/page.pdf"},
         {"state": "UT", "title": "robots", "url": "https://blocked.example.org/x.pdf"},
@@ -57,6 +59,7 @@ def test_fetch_outcomes_and_manifest(tmp_path):
     assert [f.url for f in tx] == [
         "https://ok.example.org/files/PDL%20July%202026.pdf",
         "https://other.example.org/archive/pdl-april-2026.pdf",
+        "https://ok.example.org/media/41358/download",  # a file link that names no type
     ]
     assert all(f.status == "ok" for f in tx)  # minutes and the html page don't match
     assert status[("IA", "https://ok.example.org/missing.pdf")] == "not_found"
@@ -66,6 +69,7 @@ def test_fetch_outcomes_and_manifest(tmp_path):
     assert [re.sub(r"-[0-9a-f]{8}\.pdf$", "", f) for f in files] == [
         "OH-ohio-pdl",
         "TX-PDL-July-2026",
+        "TX-landing-page",  # named after its source when the address names nothing
         "TX-pdl-april-2026",
     ]  # stored by content
     manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())

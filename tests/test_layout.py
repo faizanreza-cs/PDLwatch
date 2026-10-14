@@ -355,3 +355,24 @@ def test_a_table_with_a_column_per_status():
     rows, _ = layout.parse([page])
     assert [(r.cells["drug"], r.cells["status"]) for r in rows] == [
         ("VYVANSE", "PREFERRED"), ("ADZENYS XR-ODT", "non-preferred")]  # fmt: skip
+
+
+def test_a_table_under_centred_headers_in_the_title_band():
+    """Illinois: the header sits at the very top of the page, centred over its columns, and rows
+    run into both page bands."""
+    rows_ = [("DYANAVEL XR", "SUER", "PREFERRED_WITH_PA", 602), ("ADZENYS XR-ODT", "TBED",
+             "NON_PREFERRED", 708), ("EVEKEO", "TABS", "NON_PREFERRED", 708),
+             ("VYVANSE", "CAPS", "PREFERRED", 536), ("ADDERALL XR", "CP24", "NON_PREFERRED", 708),
+             ("STRATTERA", "CAPS", "PREFERRED", 536), ("ATOMOXETINE", "CAPS", "PREFERRED", 536),
+             ("NUVIGIL", "TABS", "NON_PREFERRED", 708)]  # fmt: skip
+    tops = [31, 46, 60, 75, 90, 104, 119, 573]  # the first two in the title band, the last in
+    page = Page(2, 792, 612, [  # the footer band
+        _line(18, ("Drug Class", 68), ("Drug Name", 298), ("Dosage Form", 464),
+              ("PDL Status", 641)),
+        *(_line(y, ("ADHD AGENTS", 4), (d, 177), (f, 464), (st, x))
+          for y, (d, f, st, x) in zip(tops, rows_, strict=True)),
+        _line(595, ("Page 2 of 150", 365)),
+    ], False)  # fmt: skip
+    rows, _ = layout.parse([page])
+    want = [(d, st) for d, _, st, _ in rows_]
+    assert [(r.cells["drug"], r.cells["status"]) for r in rows] == want

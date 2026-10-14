@@ -153,5 +153,10 @@
   url: https://www.hca.wa.gov/assets/billers-and-providers/apple-health-preferred-drug-list.pdf
 
 - state: WV
+  title: West Virginia Medicaid PDL page (current quarter)
+  page: https://bms.wv.gov/preferred-drug-list-and-coverage-details
+  match: "(?i)preferred drug list|pdl"
+  max: 2
+- state: WV
   title: West Virginia Medicaid PDL, 2024 Q1
   url: https://dhhr.wv.gov/bms/BMS%20Pharmacy/Documents/Preferred%20Drug%20List/2023/WV%20PDL%202024.Q1.pdf

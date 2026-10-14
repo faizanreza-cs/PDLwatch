@@ -149,3 +149,29 @@ def test_undated_documents_take_a_date_from_their_source():
     assert (b.effective, b.effective_from, b.first_seen[:10]) == ("2026-10-02", "file name",
                                                                   "2026-10-03")  # fmt: skip
     assert (c.effective, c.effective_from) == ("2026-07-01", None)  # its own date is kept
+
+
+def test_a_living_list_is_dated_by_its_file(tmp_path, monkeypatch):
+    """Washington's list still says "Effective June 1, 2020" in a file saved in 2026."""
+    from reportlab.pdfgen import canvas
+
+    from pdlwatch import pipeline
+    from pdlwatch.extract.document import DocResult
+    from pdlwatch.pdf import modified
+
+    pdf = tmp_path / "fixed.pdf"
+    c = canvas.Canvas(str(pdf), invariant=1)  # reportlab's fixed dates: 2000-01-01
+    c.drawString(72, 720, "x")
+    c.save()
+    assert modified(pdf) == "2000-01-01"
+
+    saved = {"/x/WA.pdf": "2026-09-30", "/x/KY.pdf": "2024-06-02"}
+    monkeypatch.setattr(pipeline, "modified", saved.get)
+    wa = DocResult("WA", "/x/WA.pdf", "WA", "2020-06-01", "t", "pdl", 1, 0, [],
+                   effective_from="document")  # fmt: skip
+    ky = DocResult(
+        "KY", "/x/KY.pdf", "KY", "2024-05-31", "t", "pdl", 1, 0, [], effective_from="title"
+    )  # an old version, saved when it was current
+    pipeline.date_hints([wa, ky], {})
+    assert (wa.effective, wa.effective_from) == ("2026-09-30", "file date")
+    assert (ky.effective, ky.effective_from) == ("2024-05-31", "title")

@@ -223,16 +223,18 @@ def _clusters(xs: list[float], tol: float = 3.0) -> list[tuple[float, int]]:
     return out
 
 
-def refit(lay: Layout, below: list[Line]) -> Layout:
-    """Fit a list's columns to where its items start on this page.
+def refit(lay: Layout, below: list[Line], ocr: bool = False) -> Layout:
+    """Fit a list's or table's columns to where their cells start on this page.
 
-    Centred list headers put items in the wrong column: "PREFERRED" sits over the middle of a
-    column whose bullets start 80 pt further left, and some PDLs move the columns from page to
-    page under one header. A column's left edge moves to the leftmost place where several items
-    start, in the gap before its header, when more items start there than at the header itself.
-    The header layout is never changed: each page is fitted from it afresh.
+    Centred headers put cells in the wrong column: "PREFERRED" sits over the middle of a column
+    whose bullets start 80 pt further left, Illinois centres "Drug Name" 120 pt to the right of
+    the names under it, and some PDLs move the columns from page to page under one header. A
+    column's left edge moves to the leftmost place where several cells start, in the gap before
+    its header, when more start there than at the header itself. The header layout is never
+    changed: each page is fitted from it afresh. Tables on scans keep their header's columns:
+    OCR word positions scatter too much to move a cell edge on.
     """
-    if lay.mode != "list" or len(lay.columns) < 2:
+    if len(lay.columns) < 2 or (lay.mode == "record" and ocr):
         return lay
     clusters = _clusters(_starts(below))
     bullets = _clusters(_after_bullets(below))  # two bulleted items are evidence enough
@@ -355,17 +357,38 @@ def _cells(line: Line, layout: Layout) -> dict[str, Cell]:
     return out
 
 
-def _decor(line: Line, page: Page) -> bool:
-    """Page furniture: the title band, the footer band, a page number. A table header some PDLs
-    print inside the title band on every page (Indiana) is kept."""
+def _band(line: Line, page: Page) -> str | None:
+    """Where a line sits among the page's furniture: "number" (a page number), "top" (the title
+    band), "bottom" (the footer band), or None (the body)."""
     if _FOOTER.match(line.text.strip()):
-        return True
+        return "number"
     if line.bottom > _BOTTOM * page.height:
-        return True
-    if line.top >= _TOP * page.height:
+        return "bottom"
+    if line.top < _TOP * page.height:
+        return "top"
+    return None
+
+
+_STATUS_WORDS = re.compile(r"\b(preferred|non preferred|not covered|excluded|pdl|non pdl)\b")
+
+
+def _status_like(text: str) -> bool:
+    """A status or tier value ("NON_PREFERRED", "Preferred with PA", "T2", "NP", "X"), not a
+    sentence that happens to cross the status column."""
+    t = " ".join(re.sub(r"[^a-z0-9 ]", " ", text.lower().replace("_", " ")).split())
+    if not t or len(t.split()) > 4:
         return False
-    lay = header(line, page.width)
-    return lay is None or _known(lay) < 2
+    return bool(_STATUS_WORDS.search(t) or re.fullmatch(r"(t|tier ?)?\d|[a-z]{1,3}", t))
+
+
+def _band_row(line: Line, layout: Layout | None) -> bool:
+    """A table row printed in the title or footer band: a drug with a status value beside it,
+    in a record table."""
+    if layout is None or layout.mode != "record":
+        return False
+    cells = _cells(line, layout)
+    keys = ("status", "tier", *LIST_ROLES)
+    return "drug" in cells and any(_status_like(cells[r].text) for r in keys if r in cells)
 
 
 def _heading(line: Line, cells: dict[str, Cell], layout: Layout) -> str | None:
@@ -445,23 +468,38 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
         if trace is not None:
             trace.setdefault(page.number, []).append((line, s.layout, what))
 
+    def decor(page: Page, line: Line) -> None:
+        if trace is not None:
+            trace.setdefault(page.number, []).append((line, None, "decor"))
+
     for page in pages:
-        lines = []
+        # page furniture is skipped, except a table header printed in the title band on every
+        # page (Indiana, Illinois) and the rows under it, and table rows that run into a band
+        lines, in_band = [], []
+        band_header = False
         for ln in page.lines:
-            if not _decor(ln, page):
-                lines.append(ln)
-            elif trace is not None:
-                trace.setdefault(page.number, []).append((ln, None, "decor"))
+            where = _band(ln, page)
+            if where == "top" and not band_header:
+                band_lay = header(ln, page.width)
+                band_header = band_lay is not None and _known(band_lay) >= 2
+            if where == "number":
+                decor(page, ln)
+                continue
+            lines.append(ln)
+            in_band.append(where == "bottom" or (where == "top" and not band_header))
         heads = [header(ln, page.width) for ln in lines]
         on_page = False
         skip_next = False
         if s.base is not None:  # the last header's layout, fitted to this page's own lines
             first = next((k for k, h in enumerate(heads) if h), len(lines))
-            s.layout = refit(s.base, lines[:first])
+            s.layout = refit(s.base, lines[:first], page.ocr)
         for i, line in enumerate(lines):
             if skip_next:
                 skip_next = False
                 note(page, line, "header")
+                continue
+            if in_band[i] and not _band_row(line, s.layout):
+                decor(page, line)
                 continue
             lay = heads[i]
             if i + 1 < len(lines) and line.bottom + 6 > lines[i + 1].top:
@@ -480,7 +518,7 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 start = i + (2 if skip_next else 1)
                 stop = next((k for k in range(start, len(lines)) if heads[k]), len(lines))
                 s.base, s.block = lay, len(s.rows)
-                s.layout, on_page = refit(lay, lines[start:stop]), True
+                s.layout, on_page = refit(lay, lines[start:stop], page.ocr), True
                 s.pages.add(page.number)
                 note(page, line, "header")
                 continue
