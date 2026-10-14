@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from pdlwatch.extract.rows import ACCEPT
+from pdlwatch.history import pdl_versions
 
 SCANNED_CAP = 0.6  # changes against a scanned version always get a look
 
@@ -43,10 +44,7 @@ def _record(out: list[dict[str, Any]], pair: dict[str, Any], cap: float, product
 
 def detect(rows: pd.DataFrame, docs: pd.DataFrame) -> pd.DataFrame:
     out: list[dict[str, Any]] = []
-    pdl = docs[(docs["doc_type"] == "pdl") & docs["state"].notna() & docs["effective"].notna()]
-    # one PDL per state and date (two files with one date: the longer one, as for drug_access)
-    pdl = pdl.sort_values(["effective", "rows", "doc_id"])
-    pdl = pdl.drop_duplicates(["state", "effective"], keep="last")
+    pdl = pdl_versions(docs)  # the same versions the access table and history use
     scanned = set(docs.loc[docs["ocr_pages"] > 0, "doc_id"])
     for state, g in pdl.groupby("state"):
         ids = g["doc_id"].tolist()

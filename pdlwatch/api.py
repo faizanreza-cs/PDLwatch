@@ -72,8 +72,9 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/drugs/{drug}")
-def drug_access(drug: str) -> dict[str, Any]:
-    return _call("drug_access", drug=drug)
+def drug_access(drug: str, as_of: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+                ) -> dict[str, Any]:  # fmt: skip
+    return _call("drug_access", drug=drug, as_of=as_of)
 
 
 @app.get("/states/{state}")

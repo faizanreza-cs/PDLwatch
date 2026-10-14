@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--llm", action="store_true")
     d = sub.add_parser("drug", help="a drug's status in every state")
     d.add_argument("name")
+    d.add_argument("--as-of", help="the status in force on this date (YYYY-MM-DD)")
     st = sub.add_parser("state", help="a state's PDL, optionally one class")
     st.add_argument("state")
     st.add_argument("--class", dest="drug_class")
@@ -127,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     from pdlwatch.agent import tools
 
     if args.cmd == "drug":
-        out, err = tools.execute("drug_access", {"drug": args.name})
+        out, err = tools.execute("drug_access", {"drug": args.name, "as_of": args.as_of})
     elif args.cmd == "state":
         out, err = tools.execute("state_formulary", {"state": args.state,
                                                      "drug_class": args.drug_class})  # fmt: skip

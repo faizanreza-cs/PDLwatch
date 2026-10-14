@@ -33,6 +33,9 @@ SCHEMA: dict[str, tuple[str, ...]] = {
                      "status", "pa", "st", "ql", "confidence", "review_reasons", "evidence"),
     "changes": ("state", "product", "drug_class", "change", "before", "after", "from_doc",
                 "to_doc", "effective", "confidence", "needs_review"),
+    "drug_access_history": ("state", "product", "drug_class", "status", "tier", "pa", "st",
+                            "ql", "ql_detail", "valid_from", "valid_to", "confirmed", "doc_id",
+                            "page"),
     "products": ("product", "ingredient", "kind", "drug_class"),
     "states": ("state", "state_name"),
 }  # fmt: skip

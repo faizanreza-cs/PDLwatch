@@ -21,6 +21,7 @@ import duckdb
 import pandas as pd
 
 from pdlwatch import changes as changes_mod
+from pdlwatch import history
 from pdlwatch.cache import DocCache, extractor_key, file_sha256
 from pdlwatch.config import Settings, cache_path, corpus_path, get_settings, results_path
 from pdlwatch.drugs import PRODUCTS
@@ -82,10 +83,8 @@ def tables(results: list[DocResult], source: str) -> dict[str, pd.DataFrame]:
     if rows.empty:
         rows = pd.DataFrame(columns=list(SCHEMA["formulary_rows"]))
     rows = rows[list(SCHEMA["formulary_rows"])]
-    # the latest PDL per state is the access table; rows awaiting review stay out of it. A PDL
-    # with no readable effective date never counts as the latest; on a tie, the longer one wins
-    pdl = docs[(docs["doc_type"] == "pdl") & docs["effective"].notna()]
-    latest = pdl.sort_values(["effective", "rows", "doc_id"]).groupby("state")["doc_id"].last()
+    # the latest PDL per state is the access table; rows awaiting review stay out of it
+    latest = history.latest_pdls(docs)
     access = rows[rows["doc_id"].isin(latest) & rows["accepted"] & rows["product"].notna()].copy()
     access["state_name"] = access["state"].map(STATES)
     review = rows[~rows["accepted"]]
@@ -95,6 +94,7 @@ def tables(results: list[DocResult], source: str) -> dict[str, pd.DataFrame]:
         "drug_access": access[list(SCHEMA["drug_access"])],
         "review_queue": review[list(SCHEMA["review_queue"])],
         "changes": changes_mod.detect(rows, docs),
+        "drug_access_history": history.build(rows, docs),
         "products": pd.DataFrame([{"product": p.name, "ingredient": p.ingredient,
                                    "kind": p.kind, "drug_class": p.drug_class} for p in PRODUCTS]),
         "states": pd.DataFrame({"state": list(STATES), "state_name": list(STATES.values())}),

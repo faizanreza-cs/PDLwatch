@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from pdlwatch import pipeline
+from pdlwatch import history, pipeline
 from pdlwatch.agent.sql_guard import UnsafeSQLError, scrub_error, validate
 from pdlwatch.config import get_settings
 from pdlwatch.drugs import CLASSES, PRODUCTS, match_class, match_product
@@ -81,8 +81,10 @@ def _cite(df: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------------- tools
 
 
-def t_drug_access(drug: str) -> dict:
+def t_drug_access(drug: str, as_of: str | None = None) -> dict:
     products = resolve_drugs(drug)
+    if as_of:
+        return _as_of(products, history.check_date(as_of))
     df = _q(f"""SELECT state, state_name, product, status, tier, pa, st, ql, ql_detail, effective,
                        doc_id, page FROM drug_access WHERE product IN ({_in(products)})
                 ORDER BY product, state""")  # fmt: skip
@@ -99,6 +101,20 @@ def t_drug_access(drug: str) -> dict:
         else "."
     )
     return _ok(_cite(df), note=note + " Source = document and page each status was read from.")
+
+
+def _as_of(products: list[str], day: str) -> dict:
+    df = _q(f"""SELECT state, product, status, tier, pa, st, ql, ql_detail, valid_from, valid_to,
+                       confirmed, doc_id, page FROM drug_access_history
+                WHERE product IN ({_in(products)}) AND valid_from <= '{day}'
+                  AND (valid_to IS NULL OR '{day}' < valid_to)
+                ORDER BY product, state""")  # fmt: skip
+    df["state_name"] = df["state"].map(STATES)
+    unsure = int((~df["confirmed"].astype(bool)).sum()) if len(df) else 0
+    note = (f"Status in force on {day}, from the PDL version effective then (valid_from) until the "
+            f"next version (valid_to, exclusive). {unsure} rows were still in review "
+            "(confirmed = false).")  # fmt: skip
+    return _ok(_cite(df), note=note)
 
 
 def t_state_formulary(state: str, drug_class: str | None = None) -> dict:
@@ -236,8 +252,9 @@ def t_run_sql(sql: str) -> dict:
 
 TOOLS: dict[str, tuple[Callable[..., dict], dict[str, Any]]] = {
     "drug_access": (t_drug_access, {
-        "description": "Where one drug is covered: its status (preferred, non-preferred = prior authorization, not covered), PA, step therapy and quantity limit in every state that lists it, from each state's latest PDL, with the document and page as source. Accepts a brand (Ozempic), a generic product (liraglutide) or an ingredient (semaglutide -> every product with it).",
-        "input_schema": {"type": "object", "properties": {"drug": {"type": "string"}},
+        "description": "Where one drug is covered: its status (preferred, non-preferred = prior authorization, not covered), PA, step therapy and quantity limit in every state that lists it, from each state's latest PDL, with the document and page as source. Accepts a brand (Ozempic), a generic product (liraglutide) or an ingredient (semaglutide -> every product with it). With as_of (YYYY-MM-DD), the status in force on that date instead.",
+        "input_schema": {"type": "object", "properties": {"drug": {"type": "string"},
+                                                          "as_of": {"type": "string"}},
                          "required": ["drug"]},
     }),
     "state_formulary": (t_state_formulary, {
