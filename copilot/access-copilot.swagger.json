@@ -1,0 +1,210 @@
+{
+ "swagger": "2.0",
+ "info": {
+  "title": "PDLwatch Access Copilot",
+  "description": "Answers questions about US state Medicaid preferred drug lists: where a drug is preferred or needs prior authorization, a state's coverage of a drug class, and what changed between PDL versions. Every status cites the document and page it was read from.",
+  "version": "0.1.0"
+ },
+ "host": "your-api-host.example.com",
+ "basePath": "/",
+ "schemes": [
+  "https"
+ ],
+ "consumes": [
+  "application/json"
+ ],
+ "produces": [
+  "application/json"
+ ],
+ "securityDefinitions": {
+  "apiKey": {
+   "type": "apiKey",
+   "in": "header",
+   "name": "X-API-Key"
+  }
+ },
+ "security": [
+  {
+   "apiKey": []
+  }
+ ],
+ "paths": {
+  "/ask": {
+   "post": {
+    "operationId": "AskAccessCopilot",
+    "summary": "Ask the Access Copilot",
+    "description": "Answers one question about Medicaid drug coverage, PDL changes or extraction quality, using the analysis tools. Returns the answer and the tools it used.",
+    "parameters": [
+     {
+      "name": "body",
+      "in": "body",
+      "required": true,
+      "schema": {
+       "$ref": "#/definitions/AskRequest"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "The answer",
+      "schema": {
+       "$ref": "#/definitions/AskResponse"
+      }
+     }
+    }
+   }
+  },
+  "/drugs/{drug}": {
+   "get": {
+    "operationId": "GetDrugAccess",
+    "summary": "A drug's status in every state",
+    "description": "Status (preferred, non-preferred with prior authorization, not covered), PA, step therapy and quantity limit in each state's latest PDL. Accepts a brand, a generic or an ingredient.",
+    "parameters": [
+     {
+      "name": "drug",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "Brand, generic or ingredient, e.g. Ozempic or semaglutide"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Rows with a note; each status cites its document and page",
+      "schema": {
+       "$ref": "#/definitions/ToolResult"
+      }
+     }
+    }
+   }
+  },
+  "/states/{state}": {
+   "get": {
+    "operationId": "GetStateFormulary",
+    "summary": "A state's preferred drug list",
+    "description": "Every product on a state's latest PDL, optionally one therapeutic class.",
+    "parameters": [
+     {
+      "name": "state",
+      "in": "path",
+      "required": true,
+      "type": "string",
+      "description": "State name or two-letter code"
+     },
+     {
+      "name": "drug_class",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "description": "Therapeutic class, e.g. GLP-1 or SGLT2"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Rows with a note; each status cites its document and page",
+      "schema": {
+       "$ref": "#/definitions/ToolResult"
+      }
+     }
+    }
+   }
+  },
+  "/changes": {
+   "get": {
+    "operationId": "GetPdlChanges",
+    "summary": "Changes between PDL versions",
+    "description": "Status changes, additions, removals and quantity-limit changes between a state's consecutive PDLs.",
+    "parameters": [
+     {
+      "name": "state",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "description": "State name or two-letter code"
+     },
+     {
+      "name": "drug",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "description": "Brand, generic or ingredient"
+     },
+     {
+      "name": "change",
+      "in": "query",
+      "required": false,
+      "type": "string",
+      "description": "status, added, removed or ql",
+      "enum": [
+       "status",
+       "added",
+       "removed",
+       "ql"
+      ]
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Rows with a note; each status cites its document and page",
+      "schema": {
+       "$ref": "#/definitions/ToolResult"
+      }
+     }
+    }
+   }
+  }
+ },
+ "definitions": {
+  "AskRequest": {
+   "type": "object",
+   "required": [
+    "question"
+   ],
+   "properties": {
+    "question": {
+     "type": "string",
+     "description": "A question about Medicaid drug coverage",
+     "minLength": 3,
+     "maxLength": 2000
+    }
+   }
+  },
+  "AskResponse": {
+   "type": "object",
+   "properties": {
+    "answer": {
+     "type": "string"
+    },
+    "tools_used": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "provider": {
+     "type": "string"
+    },
+    "latency_ms": {
+     "type": "integer"
+    }
+   }
+  },
+  "ToolResult": {
+   "type": "object",
+   "properties": {
+    "rows": {
+     "type": "array",
+     "items": {
+      "type": "object"
+     }
+    },
+    "row_count": {
+     "type": "integer"
+    },
+    "note": {
+     "type": "string"
+    }
+   }
+  }
+ }
+}

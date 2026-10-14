@@ -1,0 +1,157 @@
+# Public Medicaid preferred drug lists (PDLs) and formularies, by state.
+#
+# Each entry is either
+#   url:   a direct link to one PDF, or
+#   page:  a public web page; its PDF links whose address or link text match `match` are
+#          downloaded (up to `max`). State sites rename files every quarter, so a page is often
+#          the more stable address.
+#
+# `fetch` sends one request per second, identifies itself, honours robots.txt, and skips (and
+# reports) anything that fails. Links go stale as states publish new versions: a failed entry is
+# a prompt to update this file, not an error in the pipeline. Collected October 2026.
+
+- state: CO
+  title: Health First Colorado PDL, effective April 1, 2026
+  url: https://hcpf.colorado.gov/sites/hcpf/files/04-01-26%20PDL%20V1.pdf
+- state: CO
+  title: Health First Colorado PDL, effective January 1, 2026
+  url: https://hcpf.colorado.gov/sites/hcpf/files/01-01-26%20PDL%20V4.pdf
+- state: CO
+  title: Health First Colorado brand favored product list
+  url: https://hcpf.colorado.gov/sites/hcpf/files/Brand%20Favored%20Product%20List%2010.1.25.pdf
+
+- state: FL
+  title: Florida Medicaid PDL, effective July 1, 2026
+  url: https://ahca.myflorida.com/file/medicaid/PDL%20Effective%2007.01.2026.pdf
+- state: FL
+  title: Florida Medicaid PDL page (other versions, change summaries)
+  page: https://ahca.myflorida.com/medicaid/prescribed-drugs/medicaid-pharmaceutical-therapeutics-committee/florida-medicaid-preferred-drug-list-pdl.html
+  match: "(?i)pdl|preferred|limitation"
+  max: 4
+
+- state: GA
+  title: CareSource Georgia Medicaid preferred drug list (managed care plan)
+  url: https://www.caresource.com/documents/ga-med-m-2964344-georgia-medicaid-preferred-drug-list.pdf
+
+- state: IA
+  title: Iowa Medicaid PDL, effective January 2026
+  url: https://prod-iowamedicaidpdl.optum.com/content/dam/ffs-medicaid/ia/iowa-webpdl-10126.pdf
+- state: IA
+  title: Iowa Medicaid PDL, April 2025
+  url: https://prod2-iowamedicaidpdl.optum.com/content/dam/ffs-medicare/ia/april-2025-webpdl.pdf
+- state: IA
+  title: Iowa Medicaid pharmacy program changes, June 2025
+  url: https://prod2-iowamedicaidpdl.optum.com/content/dam/ffs-medicare/ia/2685-mc-ffs-d-june-2025-ia-medicaid-pharmacy-program-changes.pdf
+
+- state: IL
+  title: Illinois Medicaid PDL, effective October 24, 2025
+  url: https://hfs.illinois.gov/content/dam/soi/en/web/hfs/sitecollectiondocuments/pdl10242025.pdf
+- state: IL
+  title: Illinois Medicaid PDL, effective July 1, 2023
+  url: https://hfs.illinois.gov/content/dam/soi/en/web/hfs/sitecollectiondocuments/pdl07012023.pdf
+- state: IL
+  title: Illinois Medicaid PDL, effective January 1, 2023
+  url: https://hfs.illinois.gov/content/dam/soi/en/web/hfs/sitecollectiondocuments/pdl01012023.pdf
+
+- state: IN
+  title: Indiana Medicaid statewide uniform PDL, effective August 1, 2026
+  url: https://contenthub-aem.optumrx.com/content/dam/contenthub/retail-pharmacy-override/assets/customsite-indiana/documents/quicklinks/20260801_INM_SUPDL_Final.pdf
+
+- state: KY
+  title: Kentucky Medicaid single PDL, May 31, 2024
+  url: https://kyportal.medimpact.com/sites/default/files/2024-08/kentucky-medicaid-pdl_05312024.pdf
+- state: KY
+  title: Kentucky Medicaid single PDL, February 9, 2024
+  url: https://kyportal.medimpact.com/sites/default/files/2024-02/kentucky-medicaid-pdl_02092024.pdf
+
+- state: MD
+  title: Maryland Medicaid PDL, effective July 1, 2026
+  url: https://health.maryland.gov/mmcp/pap/docs/PDL-7.1.2026-Final-v5.pdf
+- state: MD
+  title: Maryland Medicaid PDL, updated August 6, 2026
+  url: https://health.maryland.gov/mmcp/pap/docs/PDL-updated-8-6-2026.pdf
+- state: MD
+  title: Maryland Medicaid advisory 286 (PDL changes, July 2026)
+  url: https://health.maryland.gov/mmcp/pap/docs/ADVISORY-286-Maryland-Medicaid-Preferred-Drug-List-effective-7-1-2026.pdf
+
+- state: MI
+  title: Michigan Medicaid managed care common formulary, effective August 1, 2026
+  url: https://www.michigan.gov/mdhhs/-/media/Project/Websites/mdhhs/State-of-Michigan-Medicaid-Managed-Care-Common-Formulary.pdf
+
+- state: MS
+  title: Mississippi Medicaid universal PDL, October 2026
+  url: https://medicaid.ms.gov/wp-content/uploads/2026/08/MS-Medicaid-PDL_October-2026_v1_FINAL.pdf
+- state: MS
+  title: Mississippi Medicaid universal PDL, August 2026
+  url: https://medicaid.ms.gov/wp-content/uploads/2026/07/MS-Medicaid-PDL_August-2026_v1_FINAL.pdf
+- state: MS
+  title: Mississippi Medicaid universal PDL, July 2026
+  url: https://medicaid.ms.gov/wp-content/uploads/2026/07/MS-Medicaid-PDL_July-2026_v3_FINAL.pdf
+- state: MS
+  title: Mississippi Medicaid universal PDL, January 2026
+  url: https://medicaid.ms.gov/wp-content/uploads/2025/12/MS-Medicaid-PDL-January-2026_v1.pdf
+
+- state: NY
+  title: NYRx preferred drug program PDL
+  url: https://newyork.fhsc.com/downloads/providers/NYRx_PDP_PDL.pdf
+
+- state: OH
+  title: Ohio Medicaid unified PDL, effective July 1, 2026
+  url: https://dam.assets.ohio.gov/image/upload/medicaid.ohio.gov/PHM/unified-pdl/20260701_UPDL_New_Version_APPROVED-FINAL.pdf
+- state: OH
+  title: Ohio Medicaid unified PDL, effective April 1, 2024
+  url: https://dam.assets.ohio.gov/image/upload/medicaid.ohio.gov/PHM/drug-coverage/20240401_UPDL_v9_approved.final.pdf
+
+- state: OR
+  title: Oregon fee-for-service PDL, effective January 1, 2025
+  url: https://www.oregon.gov/oha/HSD/OHP/Tools/PDL_2025_01_01_v1.pdf
+- state: OR
+  title: Oregon fee-for-service PDL, effective April 1, 2024
+  url: https://www.oregon.gov/oha/HSD/OHP/Tools/PDL_2024_04_01_V1.pdf
+- state: OR
+  title: Oregon fee-for-service PDL, effective January 1, 2024
+  url: https://www.oregon.gov/oha/HSD/OHP/Tools/PDL_2024_01_01_v1.pdf
+
+- state: PA
+  title: Pennsylvania statewide PDL page
+  page: https://www.pa.gov/agencies/dhs/resources/pharmacy-services/preferred-drug-list.html
+  match: "(?i)pdl|preferred"
+  max: 3
+
+- state: TX
+  title: Texas Vendor Drug Program PDL page
+  page: https://www.txvendordrug.com/formulary/prior-authorization/preferred-drugs
+  match: "(?i)preferred-drug-list|pdl"
+  max: 2
+
+- state: UT
+  title: Utah Medicaid PDL page
+  page: https://medicaid.utah.gov/pharmacy/preferred-drug-list
+  match: "(?i)pdl"
+  max: 2
+- state: UT
+  title: Utah Medicaid PDL, effective October 1, 2024
+  url: https://medicaid.utah.gov/pharmacy/PDL/files/PDL%20Archive/2024/Utah%20Medicaid%20PDL%20(10-01-24).pdf
+
+- state: VA
+  title: Virginia Medicaid PDL / common core formulary page
+  page: https://www.virginiamedicaidpharmacyservices.com/provider/preferred-drug-list
+  match: "(?i)pdl|preferred|formulary"
+  max: 3
+
+- state: VT
+  title: Vermont Medicaid PDL with clinical criteria page
+  page: https://dvha.vermont.gov/providers/pharmacy/preferred-drug-list-pdl-clinical-criteria
+  match: "(?i)pdl"
+  max: 2
+- state: VT
+  title: Vermont Medicaid PDL, April 2024
+  url: https://dvha.vermont.gov/sites/dvha/files/documents/VERMONT%20PDL%204_30_24_V3_%20FINAL.pdf
+
+- state: WA
+  title: Washington Apple Health PDL
+  url: https://www.hca.wa.gov/assets/billers-and-providers/apple-health-preferred-drug-list.pdf
+
+- state: WV
+  title: West Virginia Medicaid PDL, 2024 Q1
+  url: https://dhhr.wv.gov/bms/BMS%20Pharmacy/Documents/Preferred%20Drug%20List/2023/WV%20PDL%202024.Q1.pdf

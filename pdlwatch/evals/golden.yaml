@@ -1,0 +1,111 @@
+# Golden questions for the Access Copilot agent.
+#
+# expected_tools: tools a competent analyst would use (graded: any one must be called)
+# truth:          named ground-truth function in run_evals.py; the facts it returns must appear
+#                 in the answer (numbers within tolerance). Ground truth is read from the
+#                 warehouse and results.json at eval time, so it never drifts from the data.
+
+- id: saved_queries
+  question: Which saved queries can I run?
+  expected_tools: [list_saved_queries]
+  truth: saved_query_names
+
+- id: mounjaro
+  question: Where is Mounjaro preferred?
+  expected_tools: [drug_access, compare_drugs]
+  truth: mounjaro_counts
+
+- id: semaglutide
+  question: Which states cover semaglutide products?
+  expected_tools: [drug_access]
+  truth: wegovy_not_covered
+
+- id: liraglutide
+  question: Where is liraglutide covered?
+  expected_tools: [drug_access]
+  truth: liraglutide_counts
+
+- id: ohio_glp1
+  question: What does Ohio cover for GLP-1s?
+  expected_tools: [state_formulary]
+  truth: ohio_glp1
+
+- id: texas_anticoagulants
+  question: What is on Texas's PDL for oral anticoagulants?
+  expected_tools: [state_formulary]
+  truth: texas_anticoagulants
+
+- id: sglt2_landscape
+  question: Show the SGLT2 landscape across states.
+  expected_tools: [class_landscape, run_saved_query]
+  truth: sglt2_top
+
+- id: hepc_landscape
+  question: Which Hepatitis C agents are most often preferred?
+  expected_tools: [class_landscape, run_saved_query]
+  truth: hepc_top
+
+- id: obesity_landscape
+  question: How do states cover anti-obesity drugs?
+  expected_tools: [class_landscape, run_saved_query]
+  truth: obesity_top
+
+- id: compare
+  question: Compare Ozempic vs Mounjaro across states.
+  expected_tools: [compare_drugs]
+  truth: ozempic_mounjaro_both
+
+- id: ozempic_changes
+  question: What changed for Ozempic since the last quarter?
+  expected_tools: [pdl_changes]
+  truth: ozempic_changes
+
+- id: alabama_changes
+  question: What changed in Alabama's PDL?
+  expected_tools: [pdl_changes]
+  truth: alabama_changes
+
+- id: maryland_review
+  question: What is waiting for review in Maryland?
+  expected_tools: [review_queue]
+  truth: maryland_review
+
+- id: review_reasons
+  question: Why are rows sent to review?
+  expected_tools: [review_queue, run_saved_query]
+  truth: first_review_reason
+
+- id: quality
+  question: How accurate is the extraction?
+  expected_tools: [extraction_quality]
+  truth: overall_quality
+
+- id: scanned_quality
+  question: How well does it read scanned PDFs, and how reliable is it?
+  expected_tools: [extraction_quality]
+  truth: scanned_quality
+
+- id: brand_generic
+  question: Which states prefer the brand over the generic?
+  expected_tools: [run_saved_query]
+  truth: first_brand_over_generic
+
+- id: scorecard
+  question: Show the state scorecard.
+  expected_tools: [run_saved_query]
+  truth: first_scorecard
+
+- id: wv_documents
+  question: Which documents do we have for West Virginia?
+  expected_tools: [documents]
+  truth: wv_documents
+
+- id: sql_status
+  question: Run SQL counting rows by status.
+  expected_tools: [run_sql]
+  truth: sql_status
+
+- id: sql_classes
+  question: Use SQL to count products per class.
+  expected_tools: [run_sql]
+  truth: sql_classes

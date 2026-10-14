@@ -1,0 +1,180 @@
+"""End to end: a folder of PDFs -> canonical rows -> warehouse tables + ``results.json``.
+
+``build`` runs on the synthetic corpus (generated on first use) and scores every step against
+its truth. ``run_folder`` runs the same extraction on any folder of PDFs, such as the real state
+PDLs the manual workflow downloads, without a truth to score against.
+"""
+
+from __future__ import annotations
+
+import json
+import multiprocessing as mp
+import time
+from collections import Counter
+from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
+from datetime import UTC, datetime
+from functools import partial
+from pathlib import Path
+from typing import Any
+
+import duckdb
+import pandas as pd
+
+from pdlwatch import changes as changes_mod
+from pdlwatch.config import Settings, corpus_path, get_settings, results_path
+from pdlwatch.drugs import PRODUCTS
+from pdlwatch.evaluate import evaluate
+from pdlwatch.extract.document import DocResult, extract_document
+from pdlwatch.synth import corpus as synth_corpus
+from pdlwatch.synth.states import STATES
+from pdlwatch.warehouse import SCHEMA, reset_cache
+
+Job = tuple[str, str | None, str | None]  # path, doc_id, state
+
+
+def _extract(job: Job, llm: Any = None) -> DocResult:
+    path, doc_id, state = job
+    try:
+        return extract_document(path, doc_id, state, llm=llm)
+    except Exception as e:  # one unreadable PDF must not stop a run of hundreds
+        detail = f"{type(e).__name__}: {e}"[:200]
+        return DocResult(doc_id or Path(path).stem, path, state, None, detail, "error", 0, 0, [])
+
+
+def extract_all(jobs: list[Job], llm: Any = None, workers: int = 4) -> list[DocResult]:
+    """Extract documents in parallel: processes for parsing and OCR, threads when an LLM is used
+    (provider clients don't cross process boundaries, and the calls are network-bound)."""
+    pool: Executor = (ThreadPoolExecutor(workers) if llm else
+                      ProcessPoolExecutor(workers, mp_context=mp.get_context("spawn")))  # fmt: skip
+    with pool as ex:
+        return list(ex.map(partial(_extract, llm=llm), jobs))
+
+
+def tables(results: list[DocResult], source: str) -> dict[str, pd.DataFrame]:
+    docs = pd.DataFrame([{**r.summary(), "source": source} for r in results])
+    docs["state_name"] = docs["state"].map(STATES)
+    docs["file"] = docs["path"].map(lambda p: Path(p).name)
+    rows = pd.DataFrame([{**row.to_dict(), "effective": r.effective}
+                         for r in results for row in r.rows])  # fmt: skip
+    if rows.empty:
+        rows = pd.DataFrame(columns=list(SCHEMA["formulary_rows"]))
+    rows = rows[list(SCHEMA["formulary_rows"])]
+    # the latest PDL per state is the access table; rows awaiting review stay out of it. A PDL
+    # with no readable effective date never counts as the latest; on a tie, the longer one wins
+    pdl = docs[(docs["doc_type"] == "pdl") & docs["effective"].notna()]
+    latest = pdl.sort_values(["effective", "rows", "doc_id"]).groupby("state")["doc_id"].last()
+    access = rows[rows["doc_id"].isin(latest) & rows["accepted"] & rows["product"].notna()].copy()
+    access["state_name"] = access["state"].map(STATES)
+    review = rows[~rows["accepted"]]
+    out = {
+        "documents": docs[list(SCHEMA["documents"])],
+        "formulary_rows": rows,
+        "drug_access": access[list(SCHEMA["drug_access"])],
+        "review_queue": review[list(SCHEMA["review_queue"])],
+        "changes": changes_mod.detect(rows, docs),
+        "products": pd.DataFrame([{"product": p.name, "ingredient": p.ingredient,
+                                   "kind": p.kind, "drug_class": p.drug_class} for p in PRODUCTS]),
+        "states": pd.DataFrame({"state": list(STATES), "state_name": list(STATES.values())}),
+    }  # fmt: skip
+    return out
+
+
+def write_duckdb(tabs: dict[str, pd.DataFrame], path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp.duckdb")
+    tmp.unlink(missing_ok=True)
+    con = duckdb.connect(str(tmp))
+    try:
+        for name, df in tabs.items():
+            con.register("_df", df)
+            con.execute(f"CREATE TABLE {name} AS SELECT * FROM _df")
+            con.unregister("_df")
+    finally:
+        con.close()
+    tmp.replace(path)  # readers never see a half-written database
+    reset_cache()
+    return path
+
+
+def summary(results: list[DocResult], tabs: dict[str, pd.DataFrame], seconds: float,
+            source: str) -> dict[str, Any]:  # fmt: skip
+    docs, rows = tabs["documents"], tabs["formulary_rows"]
+    reasons: Counter[str] = Counter()
+    for r in rows.loc[~rows["accepted"], "review_reasons"]:
+        reasons.update(x for x in str(r).split("; ") if x)
+    pages = int(docs["pages"].sum())
+    return {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "data": {
+            "source": source,
+            "documents": len(docs),
+            "states": int(docs["state"].nunique()),
+            "pages": pages,
+            "ocr_pages": int(docs["ocr_pages"].sum()),
+            "by_type": docs["doc_type"].value_counts().to_dict(),
+            "rows": len(rows),
+            "accepted": int(rows["accepted"].sum()),
+            "review": int((~rows["accepted"]).sum()),
+            "methods": rows["method"].value_counts().to_dict(),
+        },
+        "review_reasons": dict(reasons.most_common()),
+        "failed_documents": [
+            {"doc_id": r.doc_id, "error": r.title} for r in results if r.doc_type == "error"
+        ],  # fmt: skip
+        "changes_detected": len(tabs["changes"]),
+        "speed": {
+            "seconds": round(seconds, 1),
+            "seconds_per_page": round(seconds / max(pages, 1), 3),
+        },
+        "llm_calls": sum(r.llm_calls for r in results),
+    }
+
+
+def build(settings: Settings | None = None, seed: int = 7, llm: Any = None,
+          workers: int = 4) -> dict[str, Any]:  # fmt: skip
+    """The synthetic corpus end to end, scored against its truth."""
+    s = settings or get_settings()
+    folder = corpus_path(s.db_path)
+    if not (folder / "truth.json").exists():
+        synth_corpus.build(folder, seed)
+    truth = synth_corpus.load_truth(folder)
+    jobs = [(str(folder / d["file"]), d["doc_id"], d["state"]) for d in truth["documents"]]
+    t0 = time.perf_counter()
+    results = extract_all(jobs, llm, workers)
+    seconds = time.perf_counter() - t0
+    tabs = tables(results, "synthetic")
+    out = summary(results, tabs, seconds, "synthetic")
+    out["extraction"] = {"all": evaluate(results, truth)["groups"],
+                         "test": evaluate(results, truth, "test")["groups"]}  # fmt: skip
+    out["changes"] = changes_mod.evaluate(tabs["changes"], truth)
+    out["extractor"] = "llm" if llm else "rules"
+    write_duckdb(tabs, s.db_path)
+    results_path(s.db_path).write_text(json.dumps(out, indent=1, default=str))
+    return out
+
+
+def run_folder(folder: Path, settings: Settings | None = None,
+               states: dict[str, str] | None = None, llm: Any = None, workers: int = 4,
+               source: str = "pdf folder") -> dict[str, Any]:  # fmt: skip
+    """Any folder of PDFs (real state PDLs). ``states`` maps file stem -> state code."""
+    s = settings or get_settings()
+    files = sorted(Path(folder).glob("**/*.pdf"))
+    if not files:
+        raise FileNotFoundError(f"no PDFs in {folder}")
+    jobs: list[Job] = [(str(f), f.stem, (states or {}).get(f.stem)) for f in files]
+    t0 = time.perf_counter()
+    results = extract_all(jobs, llm, workers)
+    tabs = tables(results, source)
+    out = summary(results, tabs, time.perf_counter() - t0, source)
+    out["extractor"] = "llm" if llm else "rules"
+    write_duckdb(tabs, s.db_path)
+    results_path(s.db_path).write_text(json.dumps(out, indent=1, default=str))
+    return out
+
+
+def load_results(settings: Settings | None = None) -> dict[str, Any]:
+    s = settings or get_settings()
+    path = results_path(s.db_path)
+    if not path.exists():
+        raise FileNotFoundError(f"No results at {path}. Run `pdlwatch build` first.")
+    return json.loads(path.read_text())

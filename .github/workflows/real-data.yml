@@ -1,0 +1,68 @@
+name: Real data (state Medicaid PDLs)
+
+# Manual: downloads the public PDFs in sources/medicaid_pdls.yaml, extracts them with the same
+# pipeline as the synthetic corpus, prints the results and an audit sample, and keeps them as an
+# artifact. Nothing downloaded is committed.
+on:
+  workflow_dispatch:
+    inputs:
+      states:
+        description: "Comma-separated state codes to fetch (blank: every source)"
+        required: false
+        default: ""
+      audit:
+        description: "Accepted rows to print beside their source line for checking"
+        required: false
+        default: "60"
+      llm:
+        description: "Read prose pages with an LLM (needs the ANTHROPIC_API_KEY secret and PDLWATCH_MODEL variable)"
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PDLWATCH_DB: data/real/pdlwatch.duckdb
+      PDLWATCH_PROVIDER: ${{ inputs.llm && 'anthropic' || 'mock' }}
+      PDLWATCH_MODEL: ${{ vars.PDLWATCH_MODEL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      STATES: ${{ inputs.states }}
+      AUDIT_ROWS: ${{ inputs.audit }}
+      USE_LLM: ${{ inputs.llm }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: OCR engine
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          uv venv --allow-existing .venv
+          uv pip install --python .venv/bin/python -e ".[llm,dev]"
+      - name: Fetch and extract
+        run: |
+          args=()
+          if [ -n "$STATES" ]; then args+=(--states "$STATES"); fi
+          if [ "$USE_LLM" = "true" ]; then args+=(--llm); fi
+          .venv/bin/python -m pdlwatch.cli sync "${args[@]}"
+      - name: Results
+        run: |
+          echo "::group::results.json"
+          cat data/real/results.json
+          echo "::endgroup::"
+          .venv/bin/python -m pdlwatch.cli sql "SELECT doc_id, state, doc_type, effective, pages, ocr_pages, rows, accepted, review FROM documents ORDER BY state, effective, doc_id"
+          .venv/bin/python -m pdlwatch.cli query state_scorecard
+      - name: Audit sample
+        run: |
+          n="${AUDIT_ROWS:-60}"
+          case "$n" in ''|*[!0-9]*) n=60 ;; esac
+          .venv/bin/python -m pdlwatch.cli audit -n "$n" --pdfs data/real/pdfs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-data-results
+          path: |
+            data/real/results.json
+            data/real/manifest.json

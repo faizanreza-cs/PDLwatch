@@ -1,0 +1,73 @@
+[project]
+name = "pdlwatch"
+version = "0.1.0"
+description = "Medicaid preferred drug lists and formularies from 100+ PDFs across US states, extracted automatically: tables, column lists, tiered lists, prior authorization prose and scanned pages, normalised into one table with a confidence score and a page citation for every row."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Faizan Reza", email = "faizanreza01@gmail.com" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pdfplumber>=0.11",
+    "pypdfium2>=4.30",
+    "pillow>=10.0",
+    "reportlab>=4.0",
+    "rapidfuzz>=3.6",
+    "duckdb>=1.1",
+    "sqlglot>=25.0",
+    "pyarrow>=15",
+    "pyyaml>=6.0",
+    "pydantic>=2.6",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.70", "openai>=1.40"]
+ocr = ["pytesseract>=0.3.10"]
+snowflake = ["snowflake-connector-python[pandas]>=3.10"]
+charts = ["matplotlib>=3.8"]
+dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10", "types-PyYAML", "matplotlib>=3.8",
+       "pytesseract>=0.3.10"]
+
+[project.scripts]
+pdlwatch = "pdlwatch.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pdlwatch"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "N"]
+ignore = ["N803", "N806"]
+
+[tool.ruff.lint.isort]
+# the dataiku/ folder holds recipes, not the dataiku package
+known-third-party = ["dataiku"]
+
+[tool.ruff.lint.per-file-ignores]
+# tool descriptions, prompts and the synthetic prose are text a reader or model reads
+"pdlwatch/agent/tools.py" = ["E501"]
+"pdlwatch/agent/provider.py" = ["E501"]
+"pdlwatch/synth/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+files = ["pdlwatch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

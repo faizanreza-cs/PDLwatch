@@ -1,0 +1,41 @@
+-- One-time Snowflake setup for PDLwatch.
+-- Run as a role that can create warehouses, databases and roles (for example ACCOUNTADMIN on a
+-- trial account). Then:
+--   pip install "pdlwatch[snowflake]"
+--   export SNOWFLAKE_ACCOUNT=... SNOWFLAKE_USER=... SNOWFLAKE_PASSWORD=...
+--   SNOWFLAKE_ROLE=PDLWATCH_LOADER SNOWFLAKE_WAREHOUSE=PDLWATCH_WH pdlwatch load
+-- and point the API, the agent and Dataiku at the read-only PDLWATCH_ANALYST role:
+--   PDLWATCH_BACKEND=snowflake SNOWFLAKE_ROLE=PDLWATCH_ANALYST pdlwatch drug Ozempic
+
+CREATE WAREHOUSE IF NOT EXISTS PDLWATCH_WH
+    WAREHOUSE_SIZE = XSMALL AUTO_SUSPEND = 60 AUTO_RESUME = TRUE INITIALLY_SUSPENDED = TRUE;
+CREATE DATABASE IF NOT EXISTS PDLWATCH;
+CREATE SCHEMA IF NOT EXISTS PDLWATCH.MEDICAID;
+
+-- Loader: creates and replaces the tables (used by `pdlwatch load` and the Dataiku flow)
+CREATE ROLE IF NOT EXISTS PDLWATCH_LOADER;
+GRANT USAGE ON WAREHOUSE PDLWATCH_WH TO ROLE PDLWATCH_LOADER;
+GRANT USAGE ON DATABASE PDLWATCH TO ROLE PDLWATCH_LOADER;
+GRANT USAGE, CREATE TABLE, CREATE STAGE, CREATE FILE FORMAT ON SCHEMA PDLWATCH.MEDICAID
+    TO ROLE PDLWATCH_LOADER;
+
+-- Analyst: read-only. Use it for the API, the agent, Power BI and Dataiku's SQL recipes, so
+-- model-written SQL can never change data even if it got past the SQL guard.
+CREATE ROLE IF NOT EXISTS PDLWATCH_ANALYST;
+GRANT USAGE ON WAREHOUSE PDLWATCH_WH TO ROLE PDLWATCH_ANALYST;
+GRANT USAGE ON DATABASE PDLWATCH TO ROLE PDLWATCH_ANALYST;
+GRANT USAGE ON SCHEMA PDLWATCH.MEDICAID TO ROLE PDLWATCH_ANALYST;
+GRANT SELECT ON ALL TABLES IN SCHEMA PDLWATCH.MEDICAID TO ROLE PDLWATCH_ANALYST;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA PDLWATCH.MEDICAID TO ROLE PDLWATCH_ANALYST;
+
+-- Replace <your_user> with your Snowflake user name
+GRANT ROLE PDLWATCH_LOADER TO USER <your_user>;
+GRANT ROLE PDLWATCH_ANALYST TO USER <your_user>;
+
+-- After `pdlwatch load`: the access table every report starts from, as a view that always
+-- shows each state's latest PDL (the same rule the pipeline uses)
+-- CREATE OR REPLACE VIEW PDLWATCH.MEDICAID.LATEST_PDL AS
+-- SELECT doc_id, state, effective
+-- FROM PDLWATCH.MEDICAID.DOCUMENTS
+-- WHERE doc_type = 'pdl' AND state IS NOT NULL AND effective IS NOT NULL
+-- QUALIFY ROW_NUMBER() OVER (PARTITION BY state ORDER BY effective DESC, rows DESC, doc_id DESC) = 1;

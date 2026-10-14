@@ -1,0 +1,75 @@
+// PDLwatch measures for Power BI Desktop.
+// Data: `pdlwatch export-powerbi` writes powerbi/data/*.csv. Create each measure with
+// Modeling > New measure, pasting one block at a time.
+
+// Drug access page: select one product
+Listings = COUNTROWS ( fact_access )
+
+Preferred = CALCULATE ( COUNTROWS ( fact_access ), fact_access[status] = "preferred" )
+
+Non-Preferred = CALCULATE ( COUNTROWS ( fact_access ), fact_access[status] = "non_preferred" )
+
+Not Covered = CALCULATE ( COUNTROWS ( fact_access ), fact_access[status] = "not_covered" )
+
+Preferred Share = DIVIDE ( [Preferred], [Listings] )
+
+States Preferring = CALCULATE ( DISTINCTCOUNT ( fact_access[state] ), fact_access[status] = "preferred" )
+
+States Requiring PA = CALCULATE ( DISTINCTCOUNT ( fact_access[state] ), fact_access[pa] = TRUE () )
+
+PA Share = DIVIDE ( CALCULATE ( [Listings], fact_access[pa] = TRUE () ), [Listings] )
+
+Step Therapy Share = DIVIDE ( CALCULATE ( [Listings], fact_access[st] = TRUE () ), [Listings] )
+
+Quantity Limit Share = DIVIDE ( CALCULATE ( [Listings], fact_access[ql] = TRUE () ), [Listings] )
+
+Brand Over Generic = CALCULATE ( [Listings], fact_access[bvg] = TRUE () )
+
+// one state and one product in context (map, matrix)
+Status Label =
+SWITCH (
+    SELECTEDVALUE ( fact_access[status] ),
+    "preferred", "Preferred",
+    "non_preferred", "Non-preferred (PA)",
+    "not_covered", "Not covered",
+    "Not listed"
+)
+
+Status Colour =
+SWITCH (
+    SELECTEDVALUE ( fact_access[status] ),
+    "preferred", "#2A78D6",
+    "non_preferred", "#EB6834",
+    "not_covered", "#5C5B56",
+    "#E9E8E3"
+)
+
+// Quarterly changes page
+Changes = COUNTROWS ( fact_changes )
+
+Status Changes = CALCULATE ( [Changes], fact_changes[change] = "status" )
+
+Lost Preferred =
+CALCULATE ( [Changes], fact_changes[change] = "status", fact_changes[before] = "preferred" )
+
+Gained Preferred =
+CALCULATE ( [Changes], fact_changes[change] = "status", fact_changes[after] = "preferred" )
+
+Changes Needing Review = CALCULATE ( [Changes], fact_changes[needs_review] = TRUE () )
+
+// Review and quality page
+Rows in Review = COUNTROWS ( fact_review )
+
+Average Review Confidence = AVERAGE ( fact_review[confidence] )
+
+Rows Extracted = SUM ( dim_document[rows] )
+
+Rows Accepted = SUM ( dim_document[accepted] )
+
+Straight-through Rate = DIVIDE ( [Rows Accepted], [Rows Extracted] )
+
+OCR Page Share = DIVIDE ( SUM ( dim_document[ocr_pages] ), SUM ( dim_document[pages] ) )
+
+Row Recall = AVERAGE ( fact_extraction_quality[row_recall] )
+
+Accepted Error Rate = AVERAGE ( fact_extraction_quality[accepted_error_rate] )

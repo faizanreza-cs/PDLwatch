@@ -1,0 +1,72 @@
+import pytest
+
+from pdlwatch.drugs import (
+    BY_NAME,
+    CLASSES,
+    PRODUCTS,
+    find_products,
+    match_class,
+    match_product,
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "product"),
+    [
+        ("Ozempic", "Ozempic"),
+        ("OZEMPIC® (semaglutide) pen 2 mg/3 mL", "Ozempic"),  # mark, case, strength, form
+        ("semaglutide (Ozempic)", "Ozempic"),  # a brand in the cell wins
+        ("Victoza (liraglutide)", "Victoza"),
+        ("liraglutide", "liraglutide"),  # the generic is its own product
+        ("Nurtec ODT†", "Nurtec ODT"),
+        ("Advair Diskus 250/50", "Advair Diskus"),
+        ("Bydureon BCISE", "Bydureon BCise"),
+        ("insulin glargine-yfgn", "insulin glargine-yfgn"),
+        ("Ozempic pen injector", "Ozempic"),  # a known name inside the cell
+        ("Otezia (apremilast)", "Otezla"),  # OCR: l read as i
+        ("Jormay PM (methylphenidate)", "Jornay PM"),  # OCR: n read as m
+        ("Rinvog", "Rinvoq"),  # OCR: q read as g
+    ],
+)
+def test_names_resolve_to_products(text, product):
+    m = match_product(text)
+    assert m.product is not None and m.product.name == product
+
+
+def test_unknown_names_stay_unknown():
+    assert match_product("Approval requires a diagnosis").product is None
+    assert match_product("").product is None
+
+
+def test_dictionary_is_consistent():
+    assert len(BY_NAME) == len(PRODUCTS)  # names are unique
+    assert all(p.ingredient and p.drug_class in CLASSES for p in PRODUCTS)
+    assert all(p.kind == ("generic" if p.name[0].islower() else "brand") for p in PRODUCTS)
+
+
+def test_prose_mentions_skip_the_ingredient_after_a_brand():
+    found = [
+        p.name
+        for p in find_products(
+            "Preferred agents: Victoza (liraglutide) and liraglutide; Mounjaro requires PA."
+        )
+    ]
+    assert found == ["Victoza", "liraglutide", "Mounjaro"]
+
+
+@pytest.mark.parametrize(
+    ("text", "cls"),
+    [
+        ("GLP-1 RECEPTOR AGONISTS", "GLP-1 Receptor Agonists"),
+        ("GLP-1s", "GLP-1 Receptor Agonists"),
+        ("Cytokine & CAM Antagonists (continued)", "Cytokine and CAM Antagonists"),
+        ("DOACs", "Anticoagulants, Oral"),
+        ("Hep C", "Hepatitis C Agents"),
+    ],
+)
+def test_class_names_and_aliases(text, cls):
+    assert match_class(text) == cls
+
+
+def test_a_sentence_is_not_a_class():
+    assert match_class("Prescribers should submit requests") is None

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OCR engine
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          uv venv --allow-existing .venv
+          uv pip install --python .venv/bin/python -e ".[llm,dev]"
+      - name: Lint and type-check
+        run: make lint
+      - name: Tests
+        run: make test
+      - name: Build the corpus and extract it
+        run: make build
+      - name: Agent eval (mock provider)
+        run: make eval
+      - name: Power BI export
+        run: make powerbi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: |
+            data/results.json
+            reports/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t pdlwatch .
+      - name: Smoke test
+        run: |
+          docker run --rm pdlwatch python -c "from pdlwatch.agent.core import Agent; from pdlwatch.agent.provider import MockProvider; r = Agent(MockProvider()).ask('Where is Mounjaro preferred?'); assert r.tools_used == ['drug_access'], r.tools_used; print(r.answer)"
