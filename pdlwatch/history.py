@@ -1,8 +1,9 @@
 """Which document is a state's PDL on a given date, and each drug's status over time.
 
 One rule decides it everywhere (the access table, change detection, history): PDLs with a
-readable effective date, one per state and date. When two files share a date (a list and an
-advisory posted the same day), the longer one is the PDL.
+readable effective date, one per state and date. When two files share a date, the one fetched
+last is the PDL (a new version posted under an old file name inherits that name's date), then the
+longer one (a list and an advisory posted the same day).
 
 ``drug_access_history`` gives every product's status in every version, valid from that
 version's effective date until the next version's (exclusive), so "what was Ozempic's status in
@@ -24,7 +25,10 @@ _ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
 def pdl_versions(docs: pd.DataFrame) -> pd.DataFrame:
     """Each state's PDL versions in date order: one per state and effective date."""
     pdl = docs[(docs["doc_type"] == "pdl") & docs["state"].notna() & docs["effective"].notna()]
-    pdl = pdl.sort_values(["state", "effective", "rows", "doc_id"])
+    # on a shared date the file fetched last wins (a new version posted under the old name keeps
+    # the old name's date), then the longer one (a list beats an advisory posted the same day)
+    keys = ["state", "effective", "first_seen", "rows", "doc_id"]
+    pdl = pdl.sort_values([k for k in keys if k in pdl.columns], na_position="first")
     return pdl.drop_duplicates(["state", "effective"], keep="last")
 
 

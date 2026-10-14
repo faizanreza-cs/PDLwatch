@@ -233,9 +233,20 @@ def fetch_and_build(sources: Path, out: Path, states: list[str] | None = None, l
     s = settings or get_settings()
     got = fetch(sources, out, states)
     held = [f for f in got if f.status in {"ok", "not_modified"}]
-    # every version ever fetched stays in the folder: states for all of them, from the ledger
-    by_file = {Path(e["file"]).stem: e["state"] for e in read_ledger(out) if e.get("file")}
-    res = run_folder(out / "pdfs", s, by_file, llm=llm, source="state Medicaid PDLs (public PDFs)")
+    # every version ever fetched stays in the folder: states for all of them, from the ledger,
+    # and for undated PDFs a date from the source's title or the file's original name
+    ledger = read_ledger(out)
+    by_file = {Path(e["file"]).stem: e["state"] for e in ledger if e.get("file")}
+    hints: dict[str, dict[str, str]] = {}
+    for e in ledger:  # oldest first: the first sighting is when the file was first seen
+        if e.get("file"):
+            name = Path(unquote(urlparse(e.get("url") or "").path)).stem
+            hints.setdefault(
+                Path(e["file"]).stem,
+                {"title": e.get("title", ""), "name": name, "first_seen": e.get("fetched_at", "")},
+            )
+    res = run_folder(out / "pdfs", s, by_file, llm=llm, source="state Medicaid PDLs (public PDFs)",
+                     hints=hints)  # fmt: skip
     statuses: dict[str, int] = {}
     for f in got:
         statuses[f.status] = statuses.get(f.status, 0) + 1

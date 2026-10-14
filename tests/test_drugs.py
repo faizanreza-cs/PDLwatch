@@ -70,3 +70,13 @@ def test_class_names_and_aliases(text, cls):
 
 def test_a_sentence_is_not_a_class():
     assert match_class("Prescribers should submit requests") is None
+
+
+def test_a_product_named_for_reference_is_not_the_match():
+    from pdlwatch.drugs import match_product
+
+    assert match_product("Insulin Degludec (compare to Tresiba)").product.name == "insulin degludec"
+    assert match_product("sitagliptin (gen Januvia ® )").product is None  # not Januvia
+    m = match_product("Adalimumab-adbm (compare to Cyltezo®) biosimilar to Humira®")
+    assert m.product.name == "adalimumab-adbm"
+    assert match_product("Tresiba (insulin degludec)").product.name == "Tresiba"

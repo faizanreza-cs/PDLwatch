@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 ROLES = ("bvg", "not_covered", "non_preferred", "preferred", "pa", "ql", "st")
 
 _DEF = re.compile(
-    r"(?<![a-z0-9])(?P<code>\(brand preferred\)|tier\s*\d|t\d|\*{1,3}|[†‡§#^+]|[a-z]{1,4}|\d)"
+    r"(?<![a-z0-9])(?P<code>\(brand preferred\)|tier\s*\d|t\d|\*{1,3}|[†‡§#^+]|[a-z](?:/[a-z]){1,3}"
+    r"|[a-z]{1,4}|\d)"
     r"\s*(?:=|:|\s[–—]\s)\s*(?P<meaning>[^.;=]+)",
     re.I,
 )
@@ -31,7 +32,7 @@ def meaning_role(text: str) -> str | None:
         return "preferred"
     if re.search(r"prior auth|clinical criteria|\bpa\b", t):
         return "pa"
-    if "quantity" in t:
+    if re.search(r"quantity|dose optimi[sz]ation|frequency|duration", t):
         return "ql"
     if "step" in t:
         return "st"

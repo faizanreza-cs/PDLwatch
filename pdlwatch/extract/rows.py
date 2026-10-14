@@ -102,11 +102,16 @@ def _requirements(text: str) -> dict[str, Any]:
 _SYMBOLS = "*†‡§#^"
 
 
+# codes common enough to read without a legend
+_DEFAULT_MARKERS = {"bvg": "bvg", "cc": "pa", "pa": "pa", "ql": "ql", "st": "st"}
+
+
 def strip_markers(text: str, legend: Legend) -> tuple[str, set[str]]:
     """'Ozempic CC QL' -> ('Ozempic', {'pa', 'ql'}) using the document's legend."""
     flags: set[str] = set()
-    t = text.strip()
-    markers = legend.markers()
+    t = re.sub(r"(?<=\w),\s*(?=[a-z/]{1,5}(,|\s*$))", " ", text.strip(), flags=re.I)  # "cc,ql"
+    markers = dict(sorted({**_DEFAULT_MARKERS, **legend.markers()}.items(),
+                          key=lambda kv: -len(kv[0])))  # fmt: skip
     changed = True
     while changed and t:
         changed = False

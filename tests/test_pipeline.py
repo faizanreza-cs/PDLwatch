@@ -130,3 +130,22 @@ def test_a_second_run_extracts_only_what_changed(built, tmp_path):
         (built["root"] / "corpus" / new["file"]).read_bytes()
     )
     assert run_folder(folder, s, workers=1)["cache"] == {"from_cache": 2, "extracted": 1}
+
+
+def test_undated_documents_take_a_date_from_their_source():
+    from pdlwatch.extract.document import DocResult
+    from pdlwatch.pipeline import date_hints
+
+    def doc(doc_id: str, effective: str | None = None) -> DocResult:
+        return DocResult(doc_id, f"/x/{doc_id}.pdf", "OH", effective, "t", "pdl", 1, 0, [])
+
+    a, b, c = doc("OH-x-1a2b3c4d"), doc("VT-y-5e6f7a8b"), doc("MD-z", "2026-07-01")
+    date_hints([a, b, c], {
+        "OH-x-1a2b3c4d": {"title": "Ohio unified PDL, effective July 1, 2026", "name": "x"},
+        "VT-y-5e6f7a8b": {"title": "Vermont PDL", "name": "Vermont-PDL-20261002",
+                          "first_seen": "2026-10-03T06:00:00+00:00"},
+    })  # fmt: skip
+    assert (a.effective, a.effective_from) == ("2026-07-01", "source title")
+    assert (b.effective, b.effective_from, b.first_seen[:10]) == ("2026-10-02", "file name",
+                                                                  "2026-10-03")  # fmt: skip
+    assert (c.effective, c.effective_from) == ("2026-07-01", None)  # its own date is kept

@@ -26,7 +26,7 @@ from pdlwatch.cache import DocCache, extractor_key, file_sha256
 from pdlwatch.config import Settings, cache_path, corpus_path, get_settings, results_path
 from pdlwatch.drugs import PRODUCTS
 from pdlwatch.evaluate import evaluate
-from pdlwatch.extract.document import DocResult, extract_document
+from pdlwatch.extract.document import DocResult, date_hint, extract_document
 from pdlwatch.synth import corpus as synth_corpus
 from pdlwatch.synth.states import STATES
 from pdlwatch.warehouse import SCHEMA, reset_cache
@@ -176,10 +176,27 @@ def build(settings: Settings | None = None, seed: int = 7, llm: Any = None,
     return out
 
 
+def date_hints(results: list[DocResult], hints: dict[str, dict[str, str]]) -> None:
+    """A date for documents that don't print one: from the source's title, else the file's
+    original name ("20260701_UPDL...", "pdl10242025"). Each says where its date came from."""
+    for r in results:
+        h = hints.get(r.doc_id, {})
+        r.first_seen = h.get("first_seen") or r.first_seen
+        if r.effective or r.doc_type == "error":
+            continue
+        for origin, text in (("source title", h.get("title", "")),
+                             ("file name", h.get("name") or Path(r.path).stem)):  # fmt: skip
+            if d := date_hint(text):
+                r.effective, r.effective_from = d, origin  # rows take it in tables()
+                break
+
+
 def run_folder(folder: Path, settings: Settings | None = None,
                states: dict[str, str] | None = None, llm: Any = None, workers: int = 4,
-               source: str = "pdf folder", cache: bool = True) -> dict[str, Any]:  # fmt: skip
-    """Any folder of PDFs (real state PDLs). ``states`` maps file stem -> state code.
+               source: str = "pdf folder", cache: bool = True,
+               hints: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:  # fmt: skip
+    """Any folder of PDFs (real state PDLs). ``states`` maps file stem -> state code;
+    ``hints`` maps file stem -> {title, name, first_seen} from the fetch ledger.
 
     PDFs extracted by an earlier run (same bytes, same extractor) come from the cache next to
     the warehouse, so a weekly run only pays for what changed.
@@ -192,6 +209,7 @@ def run_folder(folder: Path, settings: Settings | None = None,
     store = DocCache(cache_path(s.db_path) / "docs", extractor_key(llm)) if cache else None
     t0 = time.perf_counter()
     results = extract_all(jobs, llm, workers, store)
+    date_hints(results, hints or {})
     tabs = tables(results, source)
     out = summary(results, tabs, time.perf_counter() - t0, source)
     out["extractor"] = "llm" if llm else "rules"

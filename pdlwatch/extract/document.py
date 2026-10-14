@@ -16,11 +16,24 @@ from pdlwatch.extract.rows import Row, dedupe, from_raw, score
 from pdlwatch.pdf import Page, load
 from pdlwatch.synth.states import BY_NAME as STATE_CODES
 
-_DATE_FORMATS = ("%B %d, %Y", "%m/%d/%Y", "%Y-%m-%d", "%b %d, %Y", "%B %Y")
-_DATE = re.compile(
-    r"effective(?: date)?:?\s+((?:january|february|march|april|may|june|july|august|september|"
-    r"october|november|december)\s+\d{1,2},\s+\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
-    re.I,
+_MONTHS = (
+    "january|february|march|april|may|june|july|august|september|october|november|"
+    "december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec"
+)
+_DATE_TEXT = (rf"(?:{_MONTHS})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}"
+              r"|\d{1,2}[/.-]\d{1,2}[/.-](?:\d{4}|\d{2})(?!\d)"
+              r"|\d{4}-\d{2}-\d{2}"
+              rf"|(?:{_MONTHS})\.?,?\s+\d{{4}}")  # fmt: skip
+# "Effective July 1, 2026", "Effective for dates of service on or after 07/01/2026"
+_DATE = re.compile(rf"\beffective\b[^.\n]{{0,60}}?({_DATE_TEXT})", re.I)
+_ANY_DATE = re.compile(rf"(?<!\d)({_DATE_TEXT})", re.I)
+_DATE_FORMATS = ("%B %d %Y", "%b %d %Y", "%m/%d/%Y", "%m/%d/%y", "%m.%d.%Y", "%m.%d.%y",
+                 "%m-%d-%Y", "%m-%d-%y", "%Y-%m-%d", "%B %Y", "%b %Y")  # fmt: skip
+# dates in file names: 20260701_UPDL, PDL_2025_01_01, pdl10242025, 4_30_24, October-2026
+_FILE_DATES = (
+    (re.compile(r"(?<!\d)(20\d\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?!\d)"), "ymd"),
+    (re.compile(r"(?<!\d)(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])[-_.]?(20\d\d)(?!\d)"), "mdy"),
+    (re.compile(r"(?<!\d)(\d{1,2})[-_.](\d{1,2})[-_.](\d\d)(?!\d)"), "mdy"),
 )
 
 
@@ -40,6 +53,8 @@ class DocResult:
     llm_calls: int = 0
     complete: bool = True  # False when a scanned page couldn't be OCR'd
     sha256: str | None = None  # of the PDF's bytes
+    effective_from: str | None = None  # document | title | source title | file name
+    first_seen: str | None = None  # when the archive first fetched this file (real PDLs)
 
     def summary(self) -> dict[str, Any]:
         methods = Counter(r.method for r in self.rows)
@@ -51,20 +66,55 @@ class DocResult:
             "review": sum(not r.accepted for r in self.rows),
             "methods": dict(methods), "seconds": round(self.seconds, 2),
             "llm_calls": self.llm_calls, "sha256": self.sha256,
+            "effective_from": self.effective_from, "first_seen": self.first_seen,
         }  # fmt: skip
 
 
-def _effective(text: str) -> str | None:
-    m = _DATE.search(text)
-    if not m:
-        return None
-    raw = " ".join(m.group(1).split())
+def _to_date(raw: str) -> str | None:
+    t = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", raw.strip(), flags=re.I)
+    t = re.sub(r"(?<=[a-z])\.", "", t, flags=re.I).replace(",", " ")  # "Jan. 1, 2026"
+    t = " ".join(re.sub(r"\bsept\b", "sep", t, flags=re.I).split())
     for fmt in _DATE_FORMATS:
         try:
-            return datetime.strptime(raw, fmt).date().isoformat()
+            d = datetime.strptime(t, fmt).date()
         except ValueError:
             continue
+        if 2000 <= d.year <= 2040:
+            return d.isoformat()
     return None
+
+
+def _effective(pages: list[Page]) -> tuple[str | None, str | None]:
+    """The effective date and where it was read: an "effective ..." phrase on the first two
+    pages, else a date in the opening lines (the title)."""
+    text = " ".join(ln.text for p in pages[:2] for ln in p.lines)
+    for m in _DATE.finditer(text):
+        if d := _to_date(m.group(1)):
+            return d, "document"
+    head = " ".join(ln.text for ln in pages[0].lines[:8]) if pages else ""
+    for m in _ANY_DATE.finditer(head):
+        if d := _to_date(m.group(1)):
+            return d, "title"
+    return None, None
+
+
+def date_hint(text: str) -> str | None:
+    """A date in a source's title or a file name, for a document that doesn't print one."""
+    t = text or ""
+    for pattern in (_DATE, _ANY_DATE):
+        for m in pattern.finditer(t):
+            if d := _to_date(m.group(1)):
+                return d
+    for pattern, order in _FILE_DATES:
+        for m in pattern.finditer(t):
+            parts = dict(zip(order, m.groups(), strict=True))
+            y = int(parts["y"]) + (2000 if len(parts["y"]) == 2 else 0)
+            try:
+                return datetime(y, int(parts["m"]), int(parts["d"])).date().isoformat()
+            except ValueError:
+                continue
+    month = re.search(rf"(?<![a-z])({_MONTHS})[-_ ]?(20\d\d)(?!\d)", t, re.I)
+    return _to_date(f"{month.group(1)} {month.group(2)}") if month else None
 
 
 def _state(text: str) -> str | None:
@@ -115,10 +165,11 @@ def extract_document(path: str | Path, doc_id: str | None = None, state: str | N
     rows = dedupe(score(rows))
     title = pages[0].lines[0].text if pages and pages[0].lines else path.stem
     doc_type = _doc_type(title, head, bool(table_pages))
-    return DocResult(doc_id, str(path), state, _effective(" ".join(
-        ln.text for p in pages[:1] for ln in p.lines)), title, doc_type, len(pages),
-        sum(p.ocr for p in pages), rows, leg.codes, time.perf_counter() - t0, calls,
-        complete=not any(p.ocr_failed for p in pages))  # fmt: skip
+    effective, effective_from = _effective(pages)
+    return DocResult(doc_id, str(path), state, effective, title, doc_type, len(pages),
+                     sum(p.ocr for p in pages), rows, leg.codes, time.perf_counter() - t0, calls,
+                     complete=not any(p.ocr_failed for p in pages),
+                     effective_from=effective_from)  # fmt: skip
 
 
 def _doc_type(title: str, head: str, has_tables: bool) -> str:

@@ -29,11 +29,16 @@ LIST_ROLES = ("preferred", "non_preferred", "not_covered")
 _ROLE_PATTERNS: list[tuple[str, str]] = [
     ("not_covered", r"(not covered|excluded( drugs| products)?|non-covered|not on formulary)"),
     ("non_preferred", r"(non-? ?preferred|not preferred|non-? ?pdl)"
-                      r"( agents| drugs| products| medications)?"),
+                      r"( agents| drugs| products| medications)?"
+                      r"( ?/ ?requires? (prior authorization|pa)"
+                      r"| (prior authorization|pa) required)?"),
     ("preferred", r"preferred( agents| drugs| products| medications)"),
     ("criteria", r"(pa criteria|clinical criteria|criteria|comments)"),
-    ("class", r"(therapeutic class|drug class|class|category|therapeutic category)"),
-    ("drug", r"(drug|drug name|medication|product|product name|agent|brand name|generic name)"),
+    ("class", r"(therapeutic class|(.+ )?drug class|class|category|therapeutic category"
+              r"|hic3 desc(ription)?|system|body system)"),
+    ("code", r"(hic3|hicl|gcn|gcn seq no|gsn|ndc)"),  # a class or product code column
+    ("drug", r"(drug|drug name|medication|product|product name|agent|brand name|label name)"),
+    ("generic", r"(generic name|generic)"),
     ("status", r"(status|pdl status|preferred status|formulary status|preferred\?"
                r"|preferred y/n|preferred|pdl)"),
     ("tier", r"(tier|drug tier|formulary tier)"),
@@ -90,6 +95,7 @@ class Column:
     hx1: float
     x0: float = 0.0  # the column's span on the page
     x1: float = 0.0
+    item_x: float | None = None  # where its items start on this page, when that is clear
 
 
 def _bounds(cols: list[Column], width: float) -> list[Column]:
@@ -138,7 +144,15 @@ def _join_split_phrases(phrases: list[Phrase]) -> list[Phrase]:
 def header(line: Line, width: float) -> Layout | None:
     """The column layout a header line defines, or None if the line isn't a header."""
     tagged = [(role(p.text), p) for p in _join_split_phrases(line.phrases)]
-    found = [(r, p) for r, p in tagged if r]
+    if not any(r == "drug" for r, _ in tagged):  # "Generic Name" is the drug when it is alone
+        tagged = [("drug" if r == "generic" else r, p) for r, p in tagged]
+    seen_drug = False
+    for k, (r, p) in enumerate(tagged):  # "Drug Name ... Product": the first names the drug
+        if r == "drug":
+            if seen_drug:
+                tagged[k] = ("other", p)
+            seen_drug = True
+    found = [(r, p) for r, p in tagged if r and r != "other"]
     unknown = [p for r, p in tagged if r is None and len(p.text) > 2]
     # real headers carry columns this parser doesn't use ("Brand/Generic", "Class Criteria");
     # allow them when two or more columns are recognised, the line starts with one of them and
@@ -159,13 +173,76 @@ def header(line: Line, width: float) -> Layout | None:
         return None
     cols = []
     for r, p in tagged:
-        if r is None:  # a column this parser doesn't read: kept so its text stays out of others
-            cols.append(Column("other", p.x0, p.x1))
+        if r in {None, "other", "code"}:  # a column this parser doesn't read: kept so its text
+            cols.append(Column("other", p.x0, p.x1))  # stays out of the others
             continue
         if mode == "list" and r == "status":  # "PDL" or "PREFERRED" beside "NON-PDL"
             r = "preferred"
         cols.append(Column(r, p.x0, p.x1))
     return Layout(mode, _bounds(cols, width), width)
+
+
+def _starts(lines: list[Line]) -> list[float]:
+    """Where list items start: phrases that name something, bullets and markers left out."""
+    out = []
+    for line in lines:
+        for p in line.phrases:
+            words = [w for w in p.words if w.text.lstrip(_BULLETS)]
+            text = " ".join(w.text for w in words).lstrip(_BULLETS)
+            if len(text) >= 3 and not _MARKER_ONLY.match(text):
+                out.append(words[0].x0)
+    return out
+
+
+def _after_bullets(lines: list[Line]) -> list[float]:
+    """Where the text after each bullet starts: a bulleted list's item position."""
+    out = []
+    for line in lines:
+        words = [w for p in line.phrases for w in p.words]
+        for a, b in zip(words, words[1:], strict=False):
+            if not a.text.strip(_BULLETS) and b.text.lstrip(_BULLETS):
+                out.append(b.x0)
+    return out
+
+
+def _clusters(xs: list[float], tol: float = 3.0) -> list[tuple[float, int]]:
+    """Left edges shared by several phrases: (leftmost x, how many), left to right."""
+    out: list[tuple[float, int]] = []
+    for x in sorted(xs):
+        if out and x - out[-1][0] <= tol:
+            out[-1] = (out[-1][0], out[-1][1] + 1)
+        else:
+            out.append((x, 1))
+    return out
+
+
+def refit(lay: Layout, below: list[Line]) -> Layout:
+    """Fit a list's columns to where its items start on this page.
+
+    Centred list headers put items in the wrong column: "PREFERRED" sits over the middle of a
+    column whose bullets start 80 pt further left, and some PDLs move the columns from page to
+    page under one header. A column's left edge moves to the leftmost place where several items
+    start, in the gap before its header, when more items start there than at the header itself.
+    The header layout is never changed: each page is fitted from it afresh.
+    """
+    if lay.mode != "list" or len(lay.columns) < 2:
+        return lay
+    clusters = _clusters(_starts(below))
+    bullets = _clusters(_after_bullets(below))  # two bulleted items are evidence enough
+    cols = [Column(c.role, c.hx0, c.hx1, c.x0, c.x1) for c in lay.columns]
+    for prev, c in zip(cols, cols[1:], strict=False):
+        at_header = sum(n for x, n in clusters if c.x0 <= x < c.hx0 + 30)
+        gap = sorted(
+            [(x, n) for x, n in clusters if prev.hx1 < x < c.x0 and n >= 3]
+            + [(x, n) for x, n in bullets if prev.hx1 < x < c.x0 and n >= 2]
+        )
+        if gap and sum(n for _, n in gap) > at_header:
+            c.x0 = prev.x1 = gap[0][0] - 3
+    for c in cols:
+        after = [(x, n) for x, n in bullets if c.x0 <= x < c.x1 and n >= 2]
+        inside = [(x, n) for x, n in clusters if c.x0 <= x < c.x1 and n >= 3]
+        c.item_x = max(after, key=lambda t: t[1])[0] if after else inside[0][0] if inside else None
+    return Layout(lay.mode, cols, lay.width)
 
 
 def merge_lines(first: Line, second: Line) -> Line:
@@ -208,6 +285,13 @@ def _merge(new: Layout, last: Layout) -> Layout:
 class Cell:
     text: str
     conf: float
+    bullet: bool = False  # the item starts with a bullet: a new item, never a wrapped line
+    x: float = 0.0  # where its text starts
+    sub: bool = False  # a second-level bullet ("o"): a note on the item above, or a sub-item
+
+
+_BULLETS = "•●▪◦‣■□➢►"
+_GLYPHS = "®™©"  # superscripts PDFs often set apart, sometimes on a line of their own
 
 
 @dataclass
@@ -224,14 +308,39 @@ class RawRow:
     lines: int = 1
     reread: bool = False  # the status or tier cell was re-OCR'd on its own
     y: float = 0.0  # top of the line it starts on, to find it again on the page
+    open_note: str | None = None  # the cell a wrapped note line goes to ("ql", "st", "req")
 
 
 def _cells(line: Line, layout: Layout) -> dict[str, Cell]:
-    words: dict[str, list[tuple[str, float]]] = {}
+    words: dict[str, list[Word]] = {}
+    bulleted: set[str] = set()
+    pending = False  # a bullet on its own: the next word starts an item
     for p in line.phrases:
+        drop_number = False
         for w in p.words:
-            words.setdefault(layout.column(w.x0).role, []).append((w.text, w.conf))
-    return {r: Cell(" ".join(t for t, _ in ws), min(c for _, c in ws)) for r, ws in words.items()}
+            text = w.text.lstrip(_BULLETS)
+            if not text:
+                pending = True
+                continue
+            if not text.strip(_GLYPHS):
+                drop_number = True  # "Taltz ® 1": the ® and the footnote number after it
+                continue
+            if drop_number and re.fullmatch(r"\d{1,2}", text):
+                continue
+            drop_number = False
+            r = layout.column(w.x0).role
+            if pending or text != w.text:
+                bulleted.add(r)
+                pending = False
+            words.setdefault(r, []).append(Word(text, w.x0, w.x1, w.top, w.bottom, w.bold, w.conf))
+    out = {}
+    for r, ws in words.items():
+        sub = len(ws) > 1 and ws[0].text == "o"  # "o" as a second-level bullet
+        if sub:
+            ws = ws[1:]
+        out[r] = Cell(" ".join(w.text for w in ws), min(w.conf for w in ws), r in bulleted,
+                      ws[0].x0, sub)  # fmt: skip
+    return out
 
 
 def _decor(line: Line, page: Page) -> bool:
@@ -255,10 +364,47 @@ def _heading(line: Line, cells: dict[str, Cell], layout: Layout) -> str | None:
     return None
 
 
+def _status_value(line: Line, new: Layout, current: Layout) -> bool:
+    """A lone status word ("Non-PDL", "Preferred") inside a record table."""
+    return (current.mode == "record" and new.mode == "list" and len(line.phrases) == 1
+            and len(line.text.split()) <= 2
+            and role(line.text) in {"preferred", "non_preferred", "status"})  # fmt: skip
+
+
+def _foreign_header(line: Line) -> bool:
+    """A header row of another kind of table: it starts with a drug or class column and the
+    rest are column titles this parser has no role for."""
+    if len(line.phrases) < 2 or role(line.phrases[0].text) not in {"drug", "class"}:
+        return False
+    rest = line.phrases[1:]
+    return all(role(p.text) is None and len(p.text.split()) <= 5 and p.text[:1].isupper()
+               and match_product(p.text).product is None for p in rest)  # fmt: skip
+
+
+def _spanning(line: Line, layout: Layout) -> str | None:
+    """A title set across list columns ("Antipsychotics – Second Generation" centred over
+    the page) is a class heading, not an item: no list item crosses into the next column."""
+    if layout.mode != "list" or len(line.phrases) != 1:
+        return None
+    p = line.phrases[0]
+    text = p.text.strip()
+    if text[:1] == "(" or text[:1].islower():
+        return None  # the rest of a wrapped name
+    if any(abs(p.x0 - c.item_x) <= 4 for c in layout.columns if c.item_x is not None):
+        return None  # starts where items start: a long name running over, not a title
+    edges = [c.x0 for c in layout.columns[1:]]
+    if any(p.x0 + 4 < e < p.x1 - 4 for e in edges) and match_product(text).score < 100:
+        return text
+    return None
+
+
 @dataclass
 class _State:
     layout: Layout | None = None
+    base: Layout | None = None  # the layout the last header defined, before fitting to a page
     last_list: Layout | None = None
+    bulleted: set[tuple[int, str]] = field(default_factory=set)  # (page, column) using bullets
+    block: int = 0  # index of the first row under the latest header: nothing above continues
     drug_class: str | None = None
     rows: list[RawRow] = field(default_factory=list)
     pages: set[int] = field(default_factory=set)
@@ -281,31 +427,46 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
 
     for page in pages:
         lines = [ln for ln in page.lines if not _decor(ln, page)]
+        heads = [header(ln, page.width) for ln in lines]
         on_page = False
         skip_next = False
+        if s.base is not None:  # the last header's layout, fitted to this page's own lines
+            first = next((k for k, h in enumerate(heads) if h), len(lines))
+            s.layout = refit(s.base, lines[:first])
         for i, line in enumerate(lines):
             if skip_next:
                 skip_next = False
                 note(page, line, "header")
                 continue
-            lay = header(line, page.width)
+            lay = heads[i]
             if i + 1 < len(lines) and line.bottom + 6 > lines[i + 1].top:
                 # a header whose cells wrap: the two lines together name more columns
                 merged = header(merge_lines(line, lines[i + 1]), page.width)
                 if merged is not None and (lay is None or _known(merged) > _known(lay)):
                     lay, skip_next = merged, True
+            if lay is not None and s.layout is not None and _status_value(line, lay, s.layout):
+                lay, skip_next = None, False  # "Non-PDL" split off its table row: a cell
             if lay is not None:
                 if s.last_list is not None:
                     lay = _merge(lay, s.last_list)
                 if lay.mode == "list" and lay.roles() & {"preferred", "non_preferred"}:
                     s.last_list = lay  # a NOT COVERED block isn't a template for the next class
-                s.layout, on_page = lay, True
+                start = i + (2 if skip_next else 1)
+                stop = next((k for k in range(start, len(lines)) if heads[k]), len(lines))
+                s.base, s.block = lay, len(s.rows)
+                s.layout, on_page = refit(lay, lines[start:stop]), True
                 s.pages.add(page.number)
                 note(page, line, "header")
                 continue
+            if s.layout is not None and _foreign_header(line):
+                # the header of a table this parser doesn't read ("Brand Name | Dose
+                # Optimization Limitations"): its rows aren't the list above
+                s.layout = s.base = None
+                note(page, line, "other table")
+                continue
             if s.layout is None:  # before the first table: title, legend, notes
                 note(page, line, "before the first header")
-                nxt = header(lines[i + 1], page.width) if i + 1 < len(lines) else None
+                nxt = heads[i + 1] if i + 1 < len(lines) else None
                 if (
                     nxt is not None
                     and len(line.phrases) == 1
@@ -317,9 +478,12 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 on_page = True
                 s.pages.add(page.number)
             cells = _cells(line, s.layout)
-            nxt = header(lines[i + 1], page.width) if i + 1 < len(lines) else None
+            nxt = heads[i + 1] if i + 1 < len(lines) else None
             heading = _heading(line, cells, s.layout)
-            if heading and (nxt is not None or s.layout.mode == "record" or match_class(heading)):
+            spanning = _spanning(line, s.layout)
+            if spanning or heading and (nxt is not None or s.layout.mode == "record"
+                                        or match_class(heading)):  # fmt: skip
+                heading = spanning or heading
                 s.drug_class = heading
                 note(page, line, "class heading")
                 continue
@@ -368,17 +532,26 @@ def _continues(prev: str, text: str) -> bool:
     """Does ``text`` continue the list item above it rather than start a new one?
 
     Only on evidence of a wrap: a marker or a parenthesis on its own, an unclosed "(", a name
-    broken after "/" or "-", or a dosage form left over ("inhaler", "pen injector"). A line that
-    merely starts in lower case is usually a generic on its own line ("metformin ER").
+    broken after "/", "-" or "biosimilar to", or a dosage form left over ("inhaler", "pen
+    injector"). A line that merely starts in lower case is usually a generic on its own line
+    ("metformin ER").
     """
     if _MARKER_ONLY.match(text) or text.startswith("("):
         return True
+    if prev.rstrip().endswith(("/", "-", ",", "&")) or _DANGLING.search(prev):
+        return True  # "insulin glargine-" / "yfgn", "... biosimilar to" / "Humira"
     if prev.count("(") > prev.count(")"):
-        return True  # "Genvoya (elvitegravir/cobicistat/..." waiting for its ")"
-    if prev.rstrip().endswith(("/", "-", ",", "&")):
-        return True  # "insulin glargine-" / "yfgn"
+        # "Genvoya (elvitegravir/cobicistat/..." waiting for its ")": the rest of the name is in
+        # lower case or brings the ")"; "Nicotine Gum" on the next line is the next drug
+        return ")" in text or text[:1].islower()
     return bool(text[:1].islower() and _FORM_ONLY.match(text))
 
+
+_DANGLING = re.compile(r"\b(biosimilar|compare|generic|gen|equivalent)( (to|of|for))?\s*$", re.I)
+# a second-level note: "o ST – must have tried ...", "o QL – 2 tabs/day", "o AGE – 18 and older"
+_NOTE = re.compile(r"^(?:[A-Z][A-Za-z]+ )?(ST|QL|PA|AGE|AL)\s*[–—-]", re.I)
+_NOTE_CELL = {"st": "st", "ql": "ql", "pa": "pa", "age": "req", "al": "req"}
+_REQUIRE = re.compile(r"\b(require[sd]?|not required)\b", re.I)
 
 _FORM_ONLY = re.compile(
     r"^((pen|auto-?)?injectors?|pens?|inhalers?|inhalation|patch(es)?|spray|kit|vials?|"
@@ -392,14 +565,46 @@ _FORM_ONLY = re.compile(
 _MARKER_ONLY = re.compile(r"^(([*†‡§#^]+|cc|ql|st|pa|bvg|\(brand preferred\))\s*)+$", re.I)
 
 
+# words drug names don't contain but criteria and notes do
+_PROSE = """
+a an and are as at be been by can cannot could does during each either for from has have if in
+into is it its may more must no not of on once only or other otherwise per prior provide should
+than that the their then there these this those through to unless until use used using was were
+when where which while who will with within without after before approval approved required
+requires requirement trial failure failed patients patient members member years older younger
+diagnosis documented documentation noted except least
+"""
+_PROSE_WORDS = frozenset(_PROSE.split())
+_QL_NOTE = re.compile(r"^(qty|quantity)\s*limits?\b|^limits?\s*:|^ql\s*[:=]|^max(imum)?\b", re.I)
+_MAX_ITEM_WORDS = 16  # a wrapped drug name is never longer than this
+
+
+def _prose(text: str) -> bool:
+    """Criteria or a note in a list column rather than a drug: judged on the words outside
+    parentheses ("Varenicline (Limited to 18 years and older)" is a drug), or inside them for a
+    line that is all parenthesis ("(No PA required unless otherwise noted")."""
+    outside = re.sub(r"\([^()]*(\)|$)", " ", text)
+    if not outside.strip():
+        outside = text.strip("() ")
+    words = re.findall(r"[a-z]+", outside.lower())
+    hits = sum(w in _PROSE_WORDS for w in words)
+    return hits >= 3 or (hits >= 2 and len(words) >= 5) or len(words) > 14
+
+
 def _whole_drug(text: str) -> bool:
     """A cell that is a drug name by itself, not the second line of a wrapped one."""
     return not text.startswith("(") and match_product(text).score == 100
 
 
+def _note_open(row: RawRow) -> bool:
+    """The row's last line was a note (a quantity limit, an ST or age rule), which may wrap."""
+    return row.open_note is not None
+
+
 def _list_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> None:
-    if any(role(c.text) in {"criteria", *LIST_ROLES} for c in cells.values()):
+    if any(role(cells[r].text) in {"criteria", *LIST_ROLES} for r in LIST_ROLES if r in cells):
         return  # a header OCR mangled ("DONT _PA CRITERIA")
+    assert s.layout is not None
     for r in LIST_ROLES:
         c = cells.get(r)
         if c is None or not c.text.strip():
@@ -408,22 +613,70 @@ def _list_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> Non
         marker = bool(_MARKER_ONLY.match(text))  # "QL" alone is a flag, not a "QL" header
         if not marker and (role(text) is not None or len(text) < 3):
             continue  # a stray header word or an OCR speck
-        if text.endswith(".") and len(text.split()) >= 3:
-            continue  # criteria prose that strayed into a list column
+        prev = next((x for x in reversed(s.rows[s.block :]) if x.list_role == r), None)
+        here = prev is not None and prev.page == page.number
+        if c.bullet:
+            s.bulleted.add((page.number, r))
+        col = next(k for k in s.layout.columns if k.role == r)
+        # indented under the item above: a wrap. Not on scans, where OCR specks land anywhere
+        indented = (not page.ocr and col.item_x is not None and c.x >= col.item_x + 6
+                    and not c.bullet)  # fmt: skip
+        if c.sub and _NOTE.match(text) or _QL_NOTE.match(text):
+            if here and prev is not None:  # "o ST – must have tried metformin", "QTY LIMIT: 2/day"
+                m = _NOTE.match(text)
+                cell = _NOTE_CELL[m.group(1).lower()] if m else "ql"
+                _add_note(prev, cell, text)
+            continue
+        if (
+            here
+            and prev is not None
+            and prev.open_note
+            and not c.bullet
+            and not c.sub
+            and (indented or text[:1].islower() or text[:1].isdigit() or text[:1] == "(")
+        ):
+            _add_note(prev, prev.open_note, text)  # a note that wraps onto the next line
+            continue
+        if text.endswith((".", ":")) and (len(text.split()) >= 3 or text[:1].islower()
+                                          or text.endswith(":")):  # fmt: skip
+            continue  # criteria prose or a sub-heading in a list column ("program.", "Note:")
+        outside = re.sub(r"\([^()]*(\)|$)", " ", text)
+        if _prose(text) or _REQUIRE.search(outside if outside.strip() else text):
+            continue  # "Xarelto or Eliquis cannot be used...", "(No PA required unless noted"
         if re.search(r"criteria|\b(non-?)?preferred\b", text, re.I) and not re.search(
             r"\(brand preferred\)$", text, re.I
         ):
             continue  # header words OCR mangled ("DONT _PA CRITERIA")
-        prev = next((x for x in reversed(s.rows) if x.list_role == r), None)
-        if prev is not None and prev.page == page.number and _continues(prev.cells["drug"], text):
+        in_bullets = (page.number, r) in s.bulleted and not c.bullet and not c.sub
+        if (
+            here
+            and prev is not None
+            and in_bullets
+            and col.item_x is not None
+            and c.x < col.item_x - 8
+        ):
+            continue  # a label at the bullets' position ("DPP4-I & metformin combination")
+        if (
+            here
+            and prev is not None
+            and not c.bullet
+            and not c.sub
+            and (in_bullets or indented or _continues(prev.cells["drug"], text))
+            and len((prev.cells["drug"] + " " + text).split()) <= _MAX_ITEM_WORDS
+        ):
             # a wrapped name ("glargine-" / "yfgn" joins without a space), or a marker
             sep = "" if prev.cells["drug"].rstrip().endswith(("-", "/")) else " "
             prev.cells["drug"] = prev.cells["drug"].rstrip() + sep + text
             prev.evidence += " / " + text
             continue
-        if marker:
+        if marker or in_bullets:
             continue
-        assert s.layout is not None
-        s.rows.append(RawRow(page.number, "list", {"drug": c.text}, s.drug_class, r, page.ocr,
+        s.rows.append(RawRow(page.number, "list", {"drug": text}, s.drug_class, r, page.ocr,
                              c.conf, line.text, frozenset(s.layout.roles()),
                              y=line.top))  # fmt: skip
+
+
+def _add_note(row: RawRow, cell: str, text: str) -> None:
+    row.cells[cell] = (row.cells.get(cell, "") + " " + text).strip()
+    row.evidence += " / " + text
+    row.open_note = cell

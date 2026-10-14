@@ -205,13 +205,28 @@ _FORMS = (
     r"pens?|tablets?|tabs?|capsules?|caps?|films?|injection|injectable|inhaler|inhalation|"
     r"powder|solution|vials?|kwikpen|flexpen|flextouch|solostar|cartridges?|syringes?|"
     r"auto-?injector|prefilled|pfs|sensoready|sprinkle|chewable|oral|subcutaneous|"
-    r"sublingual|kit|starter|pack|kwik pen|tempo pen"
+    r"sublingual|kit|starter|pack|kwik pen|tempo pen|pellets?|pak|packets?|susp|soln|caplets?|"
+    r"granules?|wafers?"
 )
 _STRENGTH = (
     r"\d+(\.\d+)?\s*(mg|mcg|g|ml|units?|unit/ml|%|mg/ml|mcg/act)"
     r"(\s*/\s*\d*(\.\d+)?\s*(ml|act|day|dose))?"
 )
 _MARKERS = r"[*†‡§#^¶®™©]"
+
+# "(compare to Tresiba)", "(gen Januvia)", "(generic for Dexilant)", "biosimilar to Humira": the
+# other product is named for reference; the row is the product named before it
+_REFERENCE = re.compile(
+    r"\(\s*(?:compare to|gen\.?|generic(?: for| of| to)?|authorized generic(?: of| for)?"
+    r"|biosimilar(?: to| of)?|equivalent to|ab-rated to)\s+[^()]*\)"
+    r"|\b(?:biosimilar|interchangeable|authorized generic|generic)\s+(?:to|of|for)\s+[^()]*$",
+    re.I,
+)
+
+
+def strip_references(text: str) -> str:
+    """The name without the products it is compared to."""
+    return " ".join(_REFERENCE.sub(" ", text).split())
 
 
 def normalise(text: str) -> str:
@@ -242,12 +257,22 @@ class Match:
     text: str  # the cleaned text that was matched
 
 
+def _join_letters(text: str) -> str:
+    """Letters a PDF set apart, joined again: "S avaysa" -> "Savaysa", "p ak" -> "pak"."""
+    return re.sub(r"(?<![A-Za-z])([A-Za-z]) (?=[a-z]{2,})", r"\1", text)
+
+
 def _candidates(text: str) -> list[str]:
-    """The cell itself, then each part of 'A (B)' and 'A / B' style names."""
+    """The cell itself, then each part of 'A (B)' and 'A / B' style names, and the same with
+    letters a PDF set apart joined again ("S avaysa", "P radaxa ... p ak")."""
     out = [text]
-    m = re.match(r"^(.*?)\((.*?)\)(.*)$", text)
-    if m:
-        out += [m.group(1) + m.group(3), m.group(2)]
+    joined = _join_letters(text)
+    if joined != text:
+        out.append(joined)
+    for t in list(out):
+        m = re.match(r"^(.*?)\((.*?)\)(.*)$", t)
+        if m:
+            out += [m.group(1) + m.group(3), m.group(2)]
     return [c for c in out if c.strip()]
 
 
@@ -267,13 +292,24 @@ def _names_longest_first() -> list[str]:
 def match_product(text: str, drug_class: str | None = None) -> Match:
     """The product a PDL cell names, or ``Match(None, ...)`` when nothing is close enough.
 
-    1. Exact name, or either half of "A (B)"; a brand wins over a generic, so
+    1. The name outside parentheses, exactly: "Victoza (liraglutide)" is Victoza and
+       "liraglutide (Victoza)" the generic, as PDLs that list generics first mean it.
+    2. The whole cell or the part in parentheses, exactly; a brand wins over a generic, so
        "semaglutide (Ozempic)" is Ozempic.
-    2. The longest known name inside the cell ("Ozempic pen injector").
-    3. Fuzzy, for OCR misreads: within the row's class when it is known (score 85+), otherwise
+    3. The longest known name inside the cell, outside parentheses first ("Ozempic pen
+       injector", "Pradaxa (dabigatran) pellet pak").
+    4. Fuzzy, for OCR misreads: within the row's class when it is known (score 85+), otherwise
        across the dictionary (92+).
+
+    A product named only for reference ("sitagliptin (gen Januvia)") is never the match.
     """
+    text = strip_references(text)
     idx = _index()
+    variants = list(dict.fromkeys([text, _join_letters(text)]))
+    outside = [normalise(re.sub(r"\([^()]*\)", " ", t)) for t in variants]
+    for o in outside:
+        if o in idx:
+            return Match(idx[o], 100.0, normalise(text))
     found: list[Product] = []
     for cand in _candidates(text):
         n = normalise(cand)
@@ -285,9 +321,10 @@ def match_product(text: str, drug_class: str | None = None) -> Match:
     n = normalise(text)
     if not n:
         return Match(None, 0.0, n)
-    inside = _contained(n, _names_longest_first())
-    if inside:
-        return Match(idx[inside], 95.0, n)
+    for hay in dict.fromkeys([*outside, n, *(normalise(v) for v in variants)]):
+        inside = _contained(hay, _names_longest_first()) if hay else None
+        if inside:
+            return Match(idx[inside], 95.0, n)
     for cand in _candidates(text):  # an OCR misread: "Otezia", "Mavenciad", "Jormay PM"
         folded = _folded_index().get(fold(normalise(cand)))
         if folded is not None:

@@ -66,3 +66,14 @@ def test_history_agrees_with_access_and_changes(built):
         assert not err
         got = {r["state"]: r["status"] for r in json.loads(out)["rows"]}
         assert got[c["state"]] == want, day
+
+
+def test_a_new_version_under_an_old_name_wins_its_shared_date():
+    """An undated file re-posted under the same name inherits that name's date; the one fetched
+    last is the list in force."""
+    docs = pd.DataFrame(
+        [("NY-a", "pdl", "2026-07-01", 900, "2026-07-03T10:00:00+00:00"),
+         ("NY-b", "pdl", "2026-07-01", 850, "2026-09-02T10:00:00+00:00")],
+        columns=["doc_id", "doc_type", "effective", "rows", "first_seen"],
+    ).assign(state="NY")  # fmt: skip
+    assert history.latest_pdls(docs).to_dict() == {"NY": "NY-b"}
