@@ -81,6 +81,9 @@ jobs:
           echo "::endgroup::"
           .venv/bin/python -m pdlwatch.cli sql "SELECT doc_id, state, doc_type, effective, pages, ocr_pages, rows, accepted, review FROM documents ORDER BY state, effective, doc_id"
           .venv/bin/python -m pdlwatch.cli query state_scorecard
+      - name: What waits for review
+        run: |
+          .venv/bin/python -m pdlwatch.cli sql "SELECT state, review_reasons, drug_text FROM review_queue ORDER BY random() LIMIT 60"
       - name: Audit sample
         run: |
           n="${AUDIT_ROWS:-60}"

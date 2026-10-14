@@ -157,7 +157,12 @@
   url: https://dvha.vermont.gov/sites/dvha/files/documents/VERMONT%20PDL%204_30_24_V3_%20FINAL.pdf
 
 - state: WA
-  title: Washington Apple Health PDL
+  title: Washington Apple Health PDL page (weekly versions)
+  page: https://www.hca.wa.gov/billers-providers-partners/program-information-providers/apple-health-preferred-drug-list-pdl
+  match: "(?i)preferred-drug-list|pdl"
+  max: 2
+- state: WA
+  title: Washington Apple Health PDL, June 2020 (an old copy still at this address)
   url: https://www.hca.wa.gov/assets/billers-and-providers/apple-health-preferred-drug-list.pdf
 
 - state: WV
