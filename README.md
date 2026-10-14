@@ -162,20 +162,12 @@ Azure OpenAI.
 | API (`api.py`) | `/drugs`, `/states`, `/classes`, `/changes`, `/review`, `/documents`, `/metrics`, `/queries`, `POST /extract` for one uploaded PDF, `POST /ask` | FastAPI |
 | Real PDLs (`realdata.py`, `cache.py`, `audit.py`, `sources/`) | Polite downloader that keeps every version by content and fetches only what changed, an extraction cache so a run only extracts new PDFs, and an audit printout to check rows against their source line | httpx |
 
-```mermaid
-flowchart LR
-    PDF[PDFs<br/>PDLs, formularies,<br/>PA criteria] --> TXT{text layer?}
-    TXT -- yes --> W[words + positions]
-    TXT -- no --> OCR[deskew + OCR] --> W
-    W --> T[tables and lists<br/>header-anchored columns]
-    W --> PR[prose<br/>keyword rules or LLM]
-    LEG[legend codes] --> T
-    T & PR --> N[drug dictionary<br/>+ Medicaid rules] --> S{confidence}
-    S -- accepted --> WH[(Warehouse<br/>DuckDB or Snowflake)]
-    S -- not sure --> RQ[review queue] --> WH
-    WH --> CH[changes between versions]
-    WH --> AG[Access Copilot] --> API[FastAPI]
-```
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/pipeline-dark.png">
+  <img src="docs/img/pipeline.png" alt="How a PDF becomes rows in PDLwatch" width="505">
+</picture>
+</p>
 
 ## Quickstart
 

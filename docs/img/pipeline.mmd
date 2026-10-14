@@ -1,0 +1,12 @@
+flowchart TB
+    PDF[PDFs<br/>PDLs, formularies, PA criteria] --> TXT{{text layer?}}
+    TXT -- yes --> W[words + positions]
+    TXT -- no --> OCR[deskew + OCR] --> W
+    W --> T[tables and lists<br/>header-anchored columns]
+    W --> PR[prose<br/>keyword rules or LLM]
+    LEG[legend codes] --> T
+    T & PR --> N[drug dictionary<br/>+ Medicaid rules] --> S{{confidence}}
+    S -- accepted --> WH[(Warehouse<br/>DuckDB or Snowflake)]
+    S -- not sure --> RQ[review queue] --> WH
+    WH --> CH[changes between versions]
+    WH --> AG[Access Copilot] --> API[FastAPI]

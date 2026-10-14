@@ -6,13 +6,12 @@ them, and SQL recipes build the reports on a Snowflake connection. The logic liv
 
 ## Flow
 
-```mermaid
-flowchart LR
-    F[(pdl_pdfs<br/>managed folder)] --> X[extract_pdls.py]
-    X --> D[documents] & R[formulary_rows] & A[drug_access] & Q[review_queue] & C[changes]
-    D & A & Q & C --> S[SQL recipes<br/>pdlwatch/sql/*.sql] --> SC[state_scorecard,<br/>class_landscape, ...]
-    Q --> RV[reviewers]
-```
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/img/dataiku_flow-dark.png">
+  <img src="../docs/img/dataiku_flow.png" alt="The Dataiku flow" width="863">
+</picture>
+</p>
 
 ## Setup
 

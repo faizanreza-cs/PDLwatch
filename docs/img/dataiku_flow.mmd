@@ -1,0 +1,5 @@
+flowchart TB
+    F[(pdl_pdfs<br/>managed folder)] --> X[extract_pdls.py]
+    X --> D[documents] & R[formulary_rows] & A[drug_access] & Q[review_queue] & C[changes]
+    D & A & Q & C --> S[SQL recipes<br/>pdlwatch/sql/*.sql] --> SC[state_scorecard,<br/>class_landscape, ...]
+    Q --> RV[reviewers]
