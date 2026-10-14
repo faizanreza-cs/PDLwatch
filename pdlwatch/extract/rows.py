@@ -56,6 +56,7 @@ class Row:
     confidence: float = 1.0
     review_reasons: list[str] = field(default_factory=list)
     accepted: bool = True
+    y: float | None = None  # top of the source line on the page (tables and lists)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -173,7 +174,7 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None) -> Row:
     row = Row(doc_id, state, r.page, r.method, text, cls or r.drug_class,
               m.product.name if m.product else None, m.product.ingredient if m.product else None,
               m.product.kind if m.product else None, m.score, None, ocr=r.ocr, ocr_conf=r.conf,
-              evidence=r.evidence)  # fmt: skip
+              evidence=r.evidence, y=round(r.y, 1))  # fmt: skip
     roles = r.roles
     req = _requirements(cells.get("req", ""))
     if r.list_role:

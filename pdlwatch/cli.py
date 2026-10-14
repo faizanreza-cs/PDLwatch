@@ -1,5 +1,5 @@
 """Command line: ``pdlwatch corpus | build | extract | drug | state | changes | review | query |
-sql | ask | charts | export-powerbi | load | sync | audit``."""
+sql | ask | charts | export-powerbi | load | sync | audit | inspect``."""
 
 from __future__ import annotations
 
@@ -84,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     au.add_argument("--seed", type=int, default=1)
     au.add_argument("--state")
     au.add_argument("--pdfs", help="folder of the PDFs (default: the synthetic corpus)")
+    ins = sub.add_parser("inspect", help="show how the parser reads pages of a PDF")
+    ins.add_argument("pdf", type=Path)
+    ins.add_argument("--pages", required=True, help="comma-separated page numbers, e.g. 3,52")
     f = sub.add_parser("sync", help="download new state PDL versions and extract them")
     f.add_argument("--sources", type=Path, default=Path("sources/medicaid_pdls.yaml"))
     f.add_argument("--out", type=Path, default=Path("data/real"))
@@ -115,6 +118,12 @@ def main(argv: list[str] | None = None) -> int:
         print(_summary(res))
         return 0
 
+    if args.cmd == "inspect":
+        from pdlwatch.audit import inspect
+
+        pages = [int(x) for x in args.pages.split(",") if x.strip().isdigit()]
+        print("\n".join(inspect(str(args.pdf), pages)))
+        return 0
     if args.cmd == "audit":
         from pdlwatch.audit import report
 

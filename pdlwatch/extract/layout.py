@@ -223,6 +223,7 @@ class RawRow:
     roles: frozenset[str] = frozenset()  # the columns this row's table has
     lines: int = 1
     reread: bool = False  # the status or tier cell was re-OCR'd on its own
+    y: float = 0.0  # top of the line it starts on, to find it again on the page
 
 
 def _cells(line: Line, layout: Layout) -> dict[str, Cell]:
@@ -263,9 +264,21 @@ class _State:
     pages: set[int] = field(default_factory=set)
 
 
-def parse(pages: list[Page]) -> tuple[list[RawRow], set[int]]:
-    """Every table or list row in the document, and the pages they came from."""
+Trace = dict[int, list[tuple[Line, "Layout | None", str]]]
+
+
+def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], set[int]]:
+    """Every table or list row in the document, and the pages they came from.
+
+    ``trace`` (for ``pdlwatch inspect``) collects, per page, each line with the layout in force
+    and what the line was taken for: header, heading, row or skipped.
+    """
     s = _State()
+
+    def note(page: Page, line: Line, what: str) -> None:
+        if trace is not None:
+            trace.setdefault(page.number, []).append((line, s.layout, what))
+
     for page in pages:
         lines = [ln for ln in page.lines if not _decor(ln, page)]
         on_page = False
@@ -273,6 +286,7 @@ def parse(pages: list[Page]) -> tuple[list[RawRow], set[int]]:
         for i, line in enumerate(lines):
             if skip_next:
                 skip_next = False
+                note(page, line, "header")
                 continue
             lay = header(line, page.width)
             if i + 1 < len(lines) and line.bottom + 6 > lines[i + 1].top:
@@ -287,8 +301,10 @@ def parse(pages: list[Page]) -> tuple[list[RawRow], set[int]]:
                     s.last_list = lay  # a NOT COVERED block isn't a template for the next class
                 s.layout, on_page = lay, True
                 s.pages.add(page.number)
+                note(page, line, "header")
                 continue
             if s.layout is None:  # before the first table: title, legend, notes
+                note(page, line, "before the first header")
                 nxt = header(lines[i + 1], page.width) if i + 1 < len(lines) else None
                 if (
                     nxt is not None
@@ -305,7 +321,9 @@ def parse(pages: list[Page]) -> tuple[list[RawRow], set[int]]:
             heading = _heading(line, cells, s.layout)
             if heading and (nxt is not None or s.layout.mode == "record" or match_class(heading)):
                 s.drug_class = heading
+                note(page, line, "class heading")
                 continue
+            note(page, line, "row")
             if s.layout.mode == "record":
                 _record_line(s, page, line, cells)
             else:
@@ -334,7 +352,7 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
             s.drug_class = raw["class"]
         s.rows.append(RawRow(page.number, "table", raw, s.drug_class, None, page.ocr,
                              min(c.conf for c in cells.values()), line.text,
-                             frozenset(s.layout.roles()), reread=reread))  # fmt: skip
+                             frozenset(s.layout.roles()), reread=reread, y=line.top))  # fmt: skip
         return
     if s.rows and s.rows[-1].page == page.number:  # a wrapped cell continues the last row
         last = s.rows[-1]
@@ -407,4 +425,5 @@ def _list_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> Non
             continue
         assert s.layout is not None
         s.rows.append(RawRow(page.number, "list", {"drug": c.text}, s.drug_class, r, page.ocr,
-                             c.conf, line.text, frozenset(s.layout.roles())))  # fmt: skip
+                             c.conf, line.text, frozenset(s.layout.roles()),
+                             y=line.top))  # fmt: skip

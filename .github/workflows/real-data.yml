@@ -22,6 +22,10 @@ on:
         description: "Also keep the downloaded PDFs as an artifact for 7 days, to check rows against the pages"
         type: boolean
         default: false
+      inspect:
+        description: "Pages to print as the parser reads them: part of a file name and pages, e.g. INM-SUPDL:52,57 NYRx:33"
+        required: false
+        default: ""
 
 jobs:
   sync:
@@ -75,6 +79,20 @@ jobs:
           n="${AUDIT_ROWS:-60}"
           case "$n" in ''|*[!0-9]*) n=60 ;; esac
           .venv/bin/python -m pdlwatch.cli audit -n "$n" --pdfs data/real/pdfs
+      - name: Inspect pages
+        if: inputs.inspect != ''
+        env:
+          INSPECT: ${{ inputs.inspect }}
+        run: |
+          for spec in $INSPECT; do
+            part="${spec%%:*}"; pages="${spec#*:}"
+            case "$pages" in ''|*[!0-9,]*) echo "skipping $spec: pages must be numbers"; continue ;; esac
+            for f in data/real/pdfs/*.pdf; do
+              case "$(basename "$f")" in
+                *"$part"*) .venv/bin/python -m pdlwatch.cli inspect "$f" --pages "$pages" ;;
+              esac
+            done
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: real-data-results
