@@ -42,6 +42,15 @@ def _in(values: list[str]) -> str:
     return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
 
 
+def _found_by_ingredient(key: str) -> list[str]:
+    try:
+        products = _q("SELECT product, ingredient FROM products")  # filtered here, not in SQL
+    except FileNotFoundError:  # no warehouse yet
+        return []
+    hit = products[products["ingredient"].fillna("").str.lower() == key]
+    return [str(p) for p in hit["product"]]
+
+
 def resolve_drugs(name: str) -> list[str]:
     """Products a name refers to: a brand or generic product, or every product of an ingredient
     ("semaglutide" -> Ozempic, Rybelsus, Wegovy)."""
@@ -49,10 +58,9 @@ def resolve_drugs(name: str) -> list[str]:
     by_ingredient = [p.name for p in PRODUCTS if p.ingredient.lower() == key]
     if by_ingredient:
         return by_ingredient
-    products = _q("SELECT product, ingredient FROM products")  # filtered here, not in SQL
-    found = products[products["ingredient"].fillna("").str.lower() == key]
-    if len(found):  # products the documents named that only RxNorm knows
-        return [str(p) for p in found["product"]]
+    found = _found_by_ingredient(key)  # products the documents named that only RxNorm knows
+    if found:
+        return found
     m = match_product(name)
     if m.product is None:
         raise ValueError(f"no drug in the dictionary matches {name!r}")
