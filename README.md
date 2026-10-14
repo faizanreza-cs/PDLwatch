@@ -45,6 +45,11 @@ workflow runs the same pipeline on real state PDLs.
 | What changed this quarter? | Consecutive PDLs compared per state | All 25 states with two versions: **95% of the 260 true changes found; 193 confirmed automatically, all correct**; the rest wait for review |
 | How fast? | 4 worker processes | All 106 PDFs, 317 pages (47 OCR'd), in 80 seconds |
 
+On real state PDLs there's no answer key, so accepted rows are checked by sampling. On 24 public
+PDFs from 12 states, **42% of 47,832 rows were accepted automatically, and the status was right
+in all 60 accepted rows drawn at random**; the rest wait for review with a reason
+([results](#results)).
+
 ![Where rows go](docs/img/where_rows_go.png)
 
 The numbers are honest about where the work is: tables and lists go straight through, while
@@ -199,20 +204,57 @@ Or with Docker: `docker build -t pdlwatch . && docker run -p 8000:8000 pdlwatch`
 
 ## Real state PDLs
 
-[`sources/medicaid_pdls.yaml`](sources/medicaid_pdls.yaml) lists 38 public PDL and formulary
-PDFs or pages from 20 states (Colorado, Florida, Illinois, Iowa, Maryland, Mississippi, Ohio,
-Oregon, Texas and others), including several past versions per state for change detection.
+[`sources/medicaid_pdls.yaml`](sources/medicaid_pdls.yaml) lists 42 public PDL and formulary
+PDFs or pages from 20 states, including past versions for change detection.
 `pdlwatch sync` downloads them politely (robots.txt honoured, one request per second per host,
 a User-Agent that names the project, PDFs only) and runs the same extraction. Files are kept by
 content, so a new version posted under the same address sits beside the old one, and the next
 sync asks each server whether a file changed before downloading it. There's no truth to score
 against, so `pdlwatch audit` prints a random sample of accepted rows beside the line and header
-they were read from, to check by eye.
+they were read from, to check by eye, and `pdlwatch inspect` shows how any page is read.
 
 It runs as a manual GitHub Actions workflow (**Actions > Real data (state Medicaid PDLs) > Run
-workflow**), which prints the results and the audit sample in the log and keeps the archive
-between runs. State sites rename files every quarter; a link that fails is reported in the log
-as a line to update.
+workflow**), which prints the results, a sample of the review queue and the audit sample in the
+log, and keeps the archive and the extraction cache between runs. State sites rename files every
+quarter; a link that fails is reported in the log as a line to update.
+
+### Results
+
+From run [38641454502](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38641454502)
+(14 October 2026): **24 PDFs from 12 states, 2,584 pages, all with a text layer: 47,832 rows,
+19,949 (42%) accepted automatically.** 60 accepted rows drawn at random were checked by eye
+against their line and column header: the status was right in all 60, and so were the PA and
+quantity limit flags printed on those lines. An earlier sample found one wrong row. New York
+ends its PDL with a criteria table ("Drug / Class Name | Step Therapy (ST) Parameters | ..."),
+which had been read as the list above it. Tables like it are now recognised, and New York's
+accepted rows fell from 669 to 604.
+
+| State | PDFs | Latest version | Rows | Accepted | Layout |
+|---|---|---|---|---|---|
+| Florida | 3 | Oct 2026 | 4,333 | 1,251 | Product table without a status column (every product listed is preferred), with a PA column |
+| Georgia | 1 | Oct 2026 | 1,166 | 102 | A managed care plan's formulary: two tables side by side, cells over several lines. Not read well yet |
+| Illinois | 3 | Oct 2025 | 12,421 | 5,458 | Table with centred headers at the very top of the page |
+| Indiana | 1 | Aug 2026 | 1,202 | 686 | Bulleted lists with step therapy and quantity limit notes |
+| Kentucky | 2 | May 2024 | 3,899 | 1,963 | Three lists: preferred, preferred with PA, non-preferred |
+| Maryland | 2 | Jul 2026 | 2,229 | 1,543 | Lists with "cc" and "ql" codes |
+| New York | 1 | Sep 2026 | 1,091 | 604 | Lists with superscripts and coverage notes, then a criteria table |
+| Ohio | 2 | Jul 2026 | 2,434 | 1,562 | Lists with PA, ST and brand-over-generic codes |
+| Oregon | 3 | Jan 2025 | 1,996 | 916 | One preferred column (name and form), symbols defined at the foot of each page |
+| Vermont | 3 | Oct 2026 | 6,474 | 3,059 | Lists with criteria and quantity limit notes |
+| Washington | 1 | Jun 2020 | 8,662 | 1,747 | 12-column table. Its address serves a copy saved in June 2020; the weekly versions sit on a page the downloader doesn't read yet |
+| West Virginia | 2 | Apr 2025 | 1,925 | 1,058 | Lists with PA criteria |
+
+Most rows in review name something neither the dictionary nor RxNorm's prescribable list knows
+(insulin syringes and pen needles, vitamins and other over-the-counter products, abbreviations
+like "AMPICILLIN-SULB"), carry words around a known name ("bupropion XL (Forfivo XL)"), list one
+product twice with different statuses, or are notes and criteria that sit in a list column. Each
+carries its reason. Colorado, Michigan, Utah and Texas refuse automated downloads (HTTP 403),
+Iowa's and Mississippi's servers drop the connection, and Pennsylvania's and Virginia's pages
+don't link their lists in a way the downloader follows yet.
+
+Extracting the 2,584 pages took 2 minutes 18 seconds on 4 workers (run
+[38640072478](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38640072478)); the run
+above found no new file and rebuilt every table from the extraction cache in 7 seconds.
 
 ## Integrations
 
@@ -251,9 +293,10 @@ tools and routing; `make eval-llm` scores a real model on the same questions.
 
 ## Limitations
 
-- **The synthetic PDFs are cleaner than real ones.** Four renderers can't cover every state's
-  layout: real lists have merged cells, rotated tables and footnotes in many styles. The
-  real-data workflow and its audit sample are where that shows.
+- **Real PDLs are harder than the synthetic ones.** 42% of real rows are accepted automatically
+  so far; the rest wait for review ([results](#results)). Georgia's managed care formulary is
+  mostly unread, 8 of the 20 states in the sources file don't download yet, and class names in
+  list layouts come from headings rather than the class column.
 - **Prose needs the LLM path.** The keyword rules find every drug but get only 71% of prose
   statuses right, so all prose rows go to review. The LLM extractor is built and tested with
   fake clients, but wasn't run here (no API key in this environment).
