@@ -5,7 +5,6 @@
 ![SQL](https://img.shields.io/badge/SQL-Snowflake-29b5e8)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
-**Know the day a state changes your brand's Medicaid coverage, with the page that proves it.**
 
 A drug maker's market access team needs to know, for each brand and each state Medicaid program:
 is it preferred, does it need prior authorization, step therapy or a quantity limit, and what
