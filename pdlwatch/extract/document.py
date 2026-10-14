@@ -84,18 +84,23 @@ def _to_date(raw: str) -> str | None:
     return None
 
 
-def _effective(pages: list[Page]) -> tuple[str | None, str | None]:
-    """The effective date and where it was read: an "effective ..." phrase on the first two
-    pages, else a date in the opening lines (the title)."""
+def effective_source(pages: list[Page]) -> tuple[str | None, str | None, str]:
+    """The effective date, where it was read and the words around it: an "effective ..."
+    phrase on the first two pages, else a date in the opening lines (the title)."""
     text = " ".join(ln.text for p in pages[:2] for ln in p.lines)
     for m in _DATE.finditer(text):
         if d := _to_date(m.group(1)):
-            return d, "document"
+            return d, "document", text[max(0, m.start() - 40) : m.end() + 40]
     head = " ".join(ln.text for ln in pages[0].lines[:8]) if pages else ""
     for m in _ANY_DATE.finditer(head):
         if d := _to_date(m.group(1)):
-            return d, "title"
-    return None, None
+            return d, "title", head[max(0, m.start() - 40) : m.end() + 40]
+    return None, None, ""
+
+
+def _effective(pages: list[Page]) -> tuple[str | None, str | None]:
+    d, origin, _ = effective_source(pages)
+    return d, origin
 
 
 def date_hint(text: str) -> str | None:
@@ -129,17 +134,42 @@ def _state(text: str) -> str | None:
     return max((h for h in hits if h[0] == first), key=lambda h: len(h[1]))[1] if hits else None
 
 
+# a footnote at the foot of a page: "* Drug coverage subject to meeting clinical prior
+# authorization criteria", "** Drug coverage subject to quantity limits"
+_FOOTNOTE = re.compile(r"^(\*{1,3}|[†‡§#^])\s+([A-Za-z].{5,})$")
+
+
 def legend_text(pages: list[Page]) -> str:
-    """Page 1 up to the first table header, plus any definition lines ("X = ...") later on."""
+    """Page 1 up to the first table header, plus any definition lines ("X = ...") later on and
+    the footnotes pages define their symbols in (as "* = meaning.")."""
     out = []
     if pages:
         for line in pages[0].lines:
             if layout.header(line, pages[0].width):
                 break
             out.append(line.text)
+    notes: dict[str, str] = {}
+    for page in pages:
+        for line in page.lines:
+            m = _FOOTNOTE.match(line.phrases[0].text.strip()) if line.phrases else None
+            if m:  # the first phrase only: a note beside it in the next column is not its meaning
+                notes.setdefault(m.group(1), m.group(2).rstrip(" ."))
     for page in pages[1:]:
         out += [ln.text for ln in page.lines if " = " in ln.text]
+    out += [f"{code} = {meaning}." for code, meaning in notes.items()]
     return " ".join(out)
+
+
+def _default_status(head: str, raw: list[layout.RawRow]) -> str | None:
+    """A preferred drug list whose tables have no status column lists only preferred drugs
+    (Florida's: HIC3, label name, generic name, ages, PA required). A document with a status
+    column anywhere gets no default: a table without one is something else there."""
+    if not raw or not re.search(r"preferred drug list", head, re.I):
+        return None
+    if re.search(r"non-?\s?preferred drug list", head, re.I):
+        return None
+    status = {"status", "tier", *layout.LIST_ROLES}
+    return None if any(r.roles & status for r in raw) else "preferred"
 
 
 def extract_document(path: str | Path, doc_id: str | None = None, state: str | None = None,
@@ -153,7 +183,8 @@ def extract_document(path: str | Path, doc_id: str | None = None, state: str | N
     state = state or _state(head)
     leg = legend_mod.parse(legend_text(pages))
     raw, table_pages = layout.parse(pages)
-    rows = [from_raw(r, leg, doc_id, state) for r in raw]
+    default = _default_status(head, raw)
+    rows = [from_raw(r, leg, doc_id, state, default) for r in raw]
     prose_pages = [p for p in pages if p.number not in table_pages]
     calls = 0
     if llm is not None and prose_pages:

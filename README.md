@@ -43,7 +43,7 @@ workflow runs the same pipeline on real state PDLs.
 | And scanned PDFs? | OCR after straightening the page; empty cells re-read; anything uncertain to review | 96% of rows found; 45% accepted automatically, **2 of those 404 wrong** |
 | How safe is automatic acceptance? | Confidence score with named review reasons, threshold set on the dev states | 82% of all rows accepted automatically, **2 of 5,112 wrong (0.04%)** |
 | What changed this quarter? | Consecutive PDLs compared per state | All 25 states with two versions: **95% of the 260 true changes found; 193 confirmed automatically, all correct**; the rest wait for review |
-| How fast? | 4 worker processes | All 106 PDFs, 317 pages (47 OCR'd), in 75 seconds |
+| How fast? | 4 worker processes | All 106 PDFs, 317 pages (47 OCR'd), in 80 seconds |
 
 ![Where rows go](docs/img/where_rows_go.png)
 
@@ -154,13 +154,14 @@ Azure OpenAI.
 | Synthetic corpus (`synth/`) | 106 PDLs and PA criteria PDFs for 51 jurisdictions, with the truth for every row and change; scans with tilt, noise and blur | reportlab, Pillow |
 | PDF reader (`pdf.py`) | Words, lines and phrases from the text layer, or from OCR after deskewing | pdfplumber, Tesseract |
 | Extraction (`extract/`) | Header-anchored tables and lists, legends, prose rules, LLM extraction with grounding, confidence and review reasons | Python, rapidfuzz, LLM APIs |
-| Drug dictionary (`drugs.py`) | 193 products in 20 therapeutic classes, aliases, OCR-tolerant matching | rapidfuzz |
+| Drug dictionary (`drugs.py`, `rxnorm.py`) | 193 products in 20 therapeutic classes, aliases, OCR-tolerant matching; names outside it are matched to RxNorm's ingredient and brand names | rapidfuzz, RxNorm |
 | Evaluation (`evaluate.py`, `changes.py`) | Row recall and precision, field accuracy, accepted error rate by layout and for scans; change detection against the truth | pandas |
 | History (`history.py`) | Each drug's status in force on any date, one interval per PDL version, with its source | pandas |
+| Alerts (`alerts.py`, `watchlists/`) | The changes a team watches (brands, ingredients, classes, states), rated high, medium or info, in a digest that keeps unconfirmed changes apart; sent once to a Slack or Teams webhook | Python |
 | Warehouse and saved queries (`warehouse.py`, `sql/`) | Seven tables; state scorecard, class landscape, brand over generic, quarterly changes, review backlog, extraction by document | Snowflake SQL, run locally on DuckDB via sqlglot |
 | Access Copilot (`agent/`) | Tool-using agent that cites document and page | Anthropic, OpenAI, Azure OpenAI, or offline mock |
 | API (`api.py`) | `/drugs`, `/states`, `/classes`, `/changes`, `/review`, `/documents`, `/metrics`, `/queries`, `POST /extract` for one uploaded PDF, `POST /ask` | FastAPI |
-| Real PDLs (`realdata.py`, `cache.py`, `audit.py`, `sources/`) | Polite downloader that keeps every version by content and fetches only what changed, an extraction cache so a run only extracts new PDFs, and an audit printout to check rows against their source line | httpx |
+| Real PDLs (`realdata.py`, `cache.py`, `audit.py`, `sources/`) | Polite downloader that keeps every version by content and fetches only what changed, an extraction cache so a run only extracts new PDFs, an audit printout to check rows against their source line, and `pdlwatch inspect` to see how a page is read | httpx |
 
 <p align="center">
 <picture>
@@ -179,6 +180,7 @@ pdlwatch drug semaglutide                      # every semaglutide product, ever
 pdlwatch drug Ozempic --as-of 2026-08-15       # the status in force on a date
 pdlwatch state Ohio --class GLP-1              # one state's list for one class
 pdlwatch changes --state TX                    # what changed between versions
+pdlwatch alerts --watchlist watchlists/example.yaml   # the changes a team watches, rated
 pdlwatch review --out review.csv               # the review queue, with sources
 pdlwatch extract path/to/pdl.pdf --out rows.csv   # any PDL or PA criteria PDF
 PDLWATCH_DB=data/mine.duckdb pdlwatch extract path/to/folder/   # a folder into its own warehouse
@@ -236,11 +238,12 @@ role for the agent and API), and the repo carries starter kits for
 
 ## Tests and evals
 
-**124 offline tests** cover table and list parsing on hand-built pages (including drugs the
-dictionary doesn't know), legends and Medicaid rules, review reasons for scans, change detection
-and point-in-time history, the extraction cache and the downloader against a fake server
-(unchanged files, new versions under the same address), the pipeline end to end on a small corpus,
-the agent, SQL guard, LLM grounding checks and the API.
+**159 offline tests** cover table and list parsing on hand-built pages (including layouts
+copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns),
+legends and Medicaid rules, review reasons for scans, effective dates from titles and file names,
+change detection, point-in-time history and alerts, the RxNorm lexicon on a sample release, the
+extraction cache and the downloader against a fake server, the pipeline end to end on a small
+corpus, the agent, SQL guard, LLM grounding checks and the API.
 
 **Agent eval** (`make eval`): 21 golden questions with the expected tool and the facts each answer
 must contain, read from the data at eval time. The offline mock passes 21/21, which checks the
@@ -257,8 +260,9 @@ tools and routing; `make eval-llm` scores a real model on the same questions.
 - **Scans:** about half of scanned rows go to review. A scan can also drop a footnote symbol
   without a trace; that is how the 2 wrong accepted rows on the test states lost their PA and QL
   flags.
-- **The drug dictionary is hand-built** (193 products in 20 classes). Production use would map to
-  RxNorm or NDC codes.
+- **Names outside the hand-built dictionary** (193 products in 20 classes) are matched to RxNorm
+  ingredient and brand names. The real-data workflow downloads NLM's free monthly release; the
+  class of such a product comes from the document's own headings.
 
 ## License
 

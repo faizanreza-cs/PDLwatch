@@ -96,3 +96,23 @@ def test_a_known_name_inside_a_longer_one_goes_to_review():
     r = score([from_raw(_raw("Humalog Mix 75/25"), MARKERS, "d", "OH")])[0]
     assert r.product == "Humalog" and not r.accepted  # another product, maybe
     assert "words beside the name the dictionary doesn't know" in r.review_reasons
+
+
+def test_footnote_symbols_anywhere_in_the_name():
+    """Oregon: "codeine sulfate * TABLET", with the meanings at the foot of the page."""
+    leg = parse("* = Drug coverage subject to meeting clinical prior authorization criteria. "
+                "** = Drug coverage subject to quantity limits.")  # fmt: skip
+    assert strip_markers("codeine sulfate * TABLET", leg) == ("codeine sulfate TABLET", {"pa"})
+    assert strip_markers("sumatriptan ** SPRAY", leg) == ("sumatriptan SPRAY", {"ql"})
+    assert strip_markers("Ozempic**", leg) == ("Ozempic", {"ql"})
+    assert strip_markers("Ozempic***", leg) == ("Ozempic", set())  # undefined: not read as "*"
+
+
+def test_a_preferred_with_pa_column_and_a_default_status():
+    r = from_raw(_raw("Butrans", "preferred_pa"), parse(""), "d", "KY")
+    assert (r.status, r.pa) == ("preferred", True)
+    table = RawRow(1, "table", {"drug": "Xarelto", "pa": "No"}, None, None, False, 100.0,
+                   "Xarelto | No", frozenset({"drug", "pa"}))  # fmt: skip
+    assert from_raw(table, parse(""), "d", "FL").status is None
+    r = from_raw(table, parse(""), "d", "FL", default_status="preferred")
+    assert (r.status, r.pa) == ("preferred", False) and "only preferred" in r.evidence

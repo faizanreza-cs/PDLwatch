@@ -25,16 +25,21 @@ from rapidfuzz import fuzz, process
 from pdlwatch.drugs import match_class, match_product
 from pdlwatch.pdf import Line, Page, Phrase, Word
 
-LIST_ROLES = ("preferred", "non_preferred", "not_covered")
+# list columns, each saying the status of the drugs listed in it; "preferred_pa" is a column of
+# preferred drugs that still need prior authorization ("PREFERRED WITH PA")
+LIST_ROLES = ("preferred", "preferred_pa", "non_preferred", "not_covered")
 _ROLE_PATTERNS: list[tuple[str, str]] = [
     ("not_covered", r"(not covered|excluded( drugs| products)?|non-covered|not on formulary)"),
     ("non_preferred", r"(non-? ?preferred|not preferred|non-? ?pdl)"
                       r"( agents| drugs| products| medications)?"
                       r"( ?/ ?requires? (prior authorization|pa)"
                       r"| (prior authorization|pa) required)?"),
+    ("preferred_pa", r"preferred( agents| drugs| products| medications)?"
+                     r"( with (pa|prior authorization|clinical criteria)"
+                     r"| ?[-/] ?(pa|prior authorization) required)"),
     ("preferred", r"preferred( agents| drugs| products| medications)"),
     ("criteria", r"(pa criteria|clinical criteria|criteria|comments)"),
-    ("class", r"(therapeutic class|(.+ )?drug class|class|category|therapeutic category"
+    ("class", r"(therapeutic class|(.+ )?drug (class|category)|class|category|therapeutic category"
               r"|hic3 desc(ription)?|system|body system)"),
     ("code", r"(hic3|hicl|gcn|gcn seq no|gsn|ndc)"),  # a class or product code column
     ("drug", r"(drug|drug name|medication|product|product name|agent|brand name|label name)"),
@@ -42,7 +47,8 @@ _ROLE_PATTERNS: list[tuple[str, str]] = [
     ("status", r"(status|pdl status|preferred status|formulary status|preferred\?"
                r"|preferred y/n|preferred|pdl)"),
     ("tier", r"(tier|drug tier|formulary tier)"),
-    ("pa", r"(pa|prior auth|prior authorization|pa required|prior authorization required)"),
+    ("pa", r"(pa|pa status|prior auth|prior authorization|pa required"
+           r"|prior authorization required)"),
     ("ql", r"(ql|quantity limit|quantity limits|qty limit)"),
     ("st", r"(st|step therapy|step)"),
     ("req", r"(requirements/limits|requirements|coverage requirements and limits"
@@ -146,12 +152,13 @@ def header(line: Line, width: float) -> Layout | None:
     tagged = [(role(p.text), p) for p in _join_split_phrases(line.phrases)]
     if not any(r == "drug" for r, _ in tagged):  # "Generic Name" is the drug when it is alone
         tagged = [("drug" if r == "generic" else r, p) for r, p in tagged]
-    seen_drug = False
-    for k, (r, p) in enumerate(tagged):  # "Drug Name ... Product": the first names the drug
-        if r == "drug":
-            if seen_drug:
-                tagged[k] = ("other", p)
-            seen_drug = True
+    # one column per role: "Drug Name ... Product" and "Preferred Status ... Number of Preferred"
+    # name the drug and the status in their first column; "System | Class" names the class in its
+    # last, more specific one
+    for one in ("drug", "status", "class"):
+        at = [k for k, (rk, _) in enumerate(tagged) if rk == one]
+        for k in at[:-1] if one == "class" else at[1:]:
+            tagged[k] = ("other", tagged[k][1])
     found = [(r, p) for r, p in tagged if r and r != "other"]
     unknown = [p for r, p in tagged if r is None and len(p.text) > 2]
     # real headers carry columns this parser doesn't use ("Brand/Generic", "Class Criteria");
@@ -165,7 +172,7 @@ def header(line: Line, width: float) -> Layout | None:
     names = {r for r, _ in found}
     if "drug" in names and len(found) >= 2:
         mode = "record"
-    elif names & {"non_preferred", "not_covered"} or (
+    elif names & {"non_preferred", "not_covered", "preferred_pa"} or (
         "preferred" in {role(p.text + " agents") for _, p in found} and len(found) >= 2
     ):
         mode = "list"
@@ -272,6 +279,11 @@ def _known(layout: Layout) -> int:
     return sum(c.role != "other" for c in layout.columns)
 
 
+def _rank(layout: Layout) -> tuple[int, int]:
+    """Which of two readings of a header is better: more columns known, then more different."""
+    return _known(layout), len(layout.roles())
+
+
 def _merge(new: Layout, last: Layout) -> Layout:
     """A list header that lost a phrase (OCR, a tilted scan) borrows it from the last one."""
     if new.mode != "list" or last.mode != "list" or not new.roles() < last.roles():
@@ -344,8 +356,16 @@ def _cells(line: Line, layout: Layout) -> dict[str, Cell]:
 
 
 def _decor(line: Line, page: Page) -> bool:
-    return (line.top < _TOP * page.height or line.bottom > _BOTTOM * page.height
-            or bool(_FOOTER.match(line.text.strip())))  # fmt: skip
+    """Page furniture: the title band, the footer band, a page number. A table header some PDLs
+    print inside the title band on every page (Indiana) is kept."""
+    if _FOOTER.match(line.text.strip()):
+        return True
+    if line.bottom > _BOTTOM * page.height:
+        return True
+    if line.top >= _TOP * page.height:
+        return False
+    lay = header(line, page.width)
+    return lay is None or _known(lay) < 2
 
 
 def _heading(line: Line, cells: dict[str, Cell], layout: Layout) -> str | None:
@@ -426,7 +446,12 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
             trace.setdefault(page.number, []).append((line, s.layout, what))
 
     for page in pages:
-        lines = [ln for ln in page.lines if not _decor(ln, page)]
+        lines = []
+        for ln in page.lines:
+            if not _decor(ln, page):
+                lines.append(ln)
+            elif trace is not None:
+                trace.setdefault(page.number, []).append((ln, None, "decor"))
         heads = [header(ln, page.width) for ln in lines]
         on_page = False
         skip_next = False
@@ -440,9 +465,10 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 continue
             lay = heads[i]
             if i + 1 < len(lines) and line.bottom + 6 > lines[i + 1].top:
-                # a header whose cells wrap: the two lines together name more columns
+                # a header whose cells wrap: the two lines together name more columns, or tell
+                # two apart ("PREFERRED" / "PREFERRED" + "WITH PA" below it)
                 merged = header(merge_lines(line, lines[i + 1]), page.width)
-                if merged is not None and (lay is None or _known(merged) > _known(lay)):
+                if merged is not None and (lay is None or _rank(merged) > _rank(lay)):
                     lay, skip_next = merged, True
             if lay is not None and s.layout is not None and _status_value(line, lay, s.layout):
                 lay, skip_next = None, False  # "Non-PDL" split off its table row: a cell
@@ -492,13 +518,22 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 _record_line(s, page, line, cells)
             else:
                 _list_line(s, page, line, cells)
+    for seen in (trace or {}).values():
+        seen.sort(key=lambda t: t[0].top)  # decor lines in their place on the page
     return s.rows, s.pages
+
+
+_LISTED = {"preferred": "preferred", "preferred_pa": "preferred", "non_preferred": "non-preferred",
+           "not_covered": "not covered"}  # fmt: skip
 
 
 def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> None:
     assert s.layout is not None
     keys = s.layout.roles() & {"status", "tier"}
-    starts = any(r in cells for r in keys) if keys else "drug" in cells
+    # a table with a column per status ("... | PREFERRED | NON-PREFERRED"): text in one of them
+    # (a mark, or the status written out) says the status
+    listed = [r for r in LIST_ROLES if r in cells]
+    starts = any(r in cells for r in keys) or bool(listed) if keys or listed else "drug" in cells
     reread = False
     if not starts and keys and "drug" in cells and _whole_drug(cells["drug"].text):
         # a drug on its own with an empty status: re-read the cell (OCR drops short tokens
@@ -512,6 +547,10 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
         starts = True
     if starts and "drug" in cells:
         raw = {r: c.text for r, c in cells.items()}
+        if listed and "status" not in raw and "tier" not in raw:
+            raw["status"] = _LISTED[listed[0]]
+            if listed[0] == "preferred_pa":
+                raw.setdefault("pa", "yes")
         if raw.get("class"):
             s.drug_class = raw["class"]
         s.rows.append(RawRow(page.number, "table", raw, s.drug_class, None, page.ocr,

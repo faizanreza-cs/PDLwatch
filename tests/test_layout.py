@@ -298,3 +298,60 @@ def test_product_tables_with_label_and_generic_name_columns():
     assert lay is not None and lay.mode == "record"
     roles = [c.role for c in lay.columns]
     assert roles.count("drug") == 1 and "generic" in roles and "pa" in roles
+
+
+def test_a_preferred_with_pa_column_named_over_two_lines():
+    """Kentucky: PDL DRUG CATEGORY | PREFERRED | PREFERRED (WITH PA below) | NON-PREFERRED."""
+    page = _page(
+        _line(130, ("PDL DRUG CATEGORY", 73), ("PREFERRED", 208), ("PREFERRED", 312),
+              ("NON-PREFERRED", 440)),
+        _line(140, ("WITH PA", 321)),
+        _line(160, ("NARCOTICS, LONG-", 72), ("Butrans", 298), ("Belbuca", 393)),
+        _line(170, ("ACTING", 72), ("Morphine Sulfate ER", 298), ("Buprenorphine Patch", 393)),
+        _line(180, ("NSAIDS", 72), ("Celecoxib", 185), ("Arthrotec", 393)),
+        _line(190, ("Ibuprofen Tablet", 185), ("Celebrex", 393)),
+        _line(200, ("Meloxicam Tablet", 185), ("Daypro", 393)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    got = {r.cells["drug"]: r.list_role for r in rows}
+    assert got == {"Butrans": "preferred_pa", "Belbuca": "non_preferred",
+                   "Morphine Sulfate ER": "preferred_pa", "Buprenorphine Patch": "non_preferred",
+                   "Celecoxib": "preferred", "Arthrotec": "non_preferred",
+                   "Ibuprofen Tablet": "preferred", "Celebrex": "non_preferred",
+                   "Meloxicam Tablet": "preferred", "Daypro": "non_preferred"}  # fmt: skip
+
+
+def test_a_header_printed_in_the_title_band_is_kept():
+    """Indiana prints its column header inside the band page titles use, on every page."""
+    page = Page(2, 792, 612, [
+        _line(20, ("Indiana Medicaid Preferred Drug List", 250)),  # a title: page decor
+        _line(42, ("DRUG CLASS", 92), ("PREFERRED", 283), ("NON-PREFERRED", 500)),
+        _line(90, ("Anticoagulants", 92), ("Eliquis", 283), ("Savaysa", 500)),
+        _line(560, ("Page 2 of 66", 360)),
+    ], False)  # fmt: skip
+    trace: layout.Trace = {}
+    rows, _ = layout.parse([page], trace)
+    assert [(r.list_role, r.cells["drug"]) for r in rows] == [
+        ("preferred", "Eliquis"), ("non_preferred", "Savaysa")]  # fmt: skip
+    assert [what for _, _, what in trace[2]] == ["decor", "header", "row", "decor"]
+
+
+def test_one_column_per_role_and_a_pa_status_column():
+    """Washington: PREFERRED STATUS | (NUMBER OF) PREFERRED | PA STATUS."""
+    lay = layout.header(_line(147, ("DRUG CLASS", 8), ("DRUG NAME", 400),
+                              ("PREFERRED STATUS", 931), ("PREFERRED", 1036),
+                              ("PA STATUS", 1109)), 1296)  # fmt: skip
+    assert lay is not None and lay.mode == "record"
+    assert [c.role for c in lay.columns] == ["class", "drug", "status", "other", "pa"]
+
+
+def test_a_table_with_a_column_per_status():
+    page = _page(
+        _line(100, ("Drug Name", 50), ("Dosage Form", 200), ("Preferred", 300),
+              ("Non-Preferred", 400)),
+        _line(115, ("VYVANSE", 50), ("CAPS", 200), ("PREFERRED", 300)),
+        _line(130, ("ADZENYS XR-ODT", 50), ("TBED", 200), ("NON_PREFERRED", 400)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    assert [(r.cells["drug"], r.cells["status"]) for r in rows] == [
+        ("VYVANSE", "PREFERRED"), ("ADZENYS XR-ODT", "non-preferred")]  # fmt: skip

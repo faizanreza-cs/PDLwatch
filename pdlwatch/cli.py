@@ -95,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     ins = sub.add_parser("inspect", help="show how the parser reads pages of a PDF")
     ins.add_argument("pdf", type=Path)
     ins.add_argument("--pages", required=True, help="comma-separated page numbers, e.g. 3,52")
+    ins.add_argument("--width", type=int, default=48, help="characters shown per phrase")
     f = sub.add_parser("sync", help="download new state PDL versions and extract them")
     f.add_argument("--sources", type=Path, default=Path("sources/medicaid_pdls.yaml"))
     f.add_argument("--out", type=Path, default=Path("data/real"))
@@ -164,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         from pdlwatch.audit import inspect
 
         pages = [int(x) for x in args.pages.split(",") if x.strip().isdigit()]
-        print("\n".join(inspect(str(args.pdf), pages)))
+        print("\n".join(inspect(str(args.pdf), pages, args.width)))
         return 0
     if args.cmd == "audit":
         from pdlwatch.audit import report

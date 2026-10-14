@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from pdlwatch.drugs import match_class, match_product, normalise, rxcui
-from pdlwatch.extract.layout import RawRow
+from pdlwatch.extract.layout import LIST_ROLES, RawRow
 from pdlwatch.extract.legend import DEFAULT_STATUS, Legend
 
 ACCEPT = 0.75  # rows at or above this confidence are accepted without review
@@ -107,12 +107,29 @@ _SYMBOLS = "*†‡§#^"
 _DEFAULT_MARKERS = {"bvg": "bvg", "cc": "pa", "pa": "pa", "ql": "ql", "st": "st"}
 
 
+def _symbols(run: str, markers: dict[str, str]) -> set[str]:
+    """What a run of footnote symbols means: "**" as a whole when the legend defines it, else
+    each different symbol on its own ("*†"). An undefined "**" is not read as "*"."""
+    if run in markers:
+        return {markers[run]}
+    if len(set(run)) == 1:
+        return set()
+    return {markers[c] for c in run if c in markers}
+
+
+_SYMBOL_RUN = re.compile(rf"(?<!\S)[{re.escape(_SYMBOLS)}]+(?!\S)")
+
+
 def strip_markers(text: str, legend: Legend) -> tuple[str, set[str]]:
-    """'Ozempic CC QL' -> ('Ozempic', {'pa', 'ql'}) using the document's legend."""
+    """'Ozempic CC QL' -> ('Ozempic', {'pa', 'ql'}) using the document's legend; footnote symbols
+    are read wherever they stand ("codeine sulfate * TABLET", "sumatriptan**")."""
     flags: set[str] = set()
     t = re.sub(r"(?<=\w),\s*(?=[a-z/]{1,5}(,|\s*$))", " ", text.strip(), flags=re.I)  # "cc,ql"
     markers = dict(sorted({**_DEFAULT_MARKERS, **legend.markers()}.items(),
                           key=lambda kv: -len(kv[0])))  # fmt: skip
+    for run in _SYMBOL_RUN.findall(t):  # a symbol set apart inside the name, before its form
+        flags |= _symbols(run, markers)
+    t = " ".join(_SYMBOL_RUN.sub(" ", t).split())
     changed = True
     while changed and t:
         changed = False
@@ -123,12 +140,10 @@ def strip_markers(text: str, legend: Legend) -> tuple[str, set[str]]:
                 t = t[: len(t) - len(code)].strip()
                 flags.add(flag)
                 changed = True
-        while t and t[-1] in _SYMBOLS:
-            sym = t[-1]
-            role = markers.get(sym) or markers.get(sym * 2)
-            if role:
-                flags.add(role)
-            t = t[:-1].strip()
+        run = re.search(rf"[{re.escape(_SYMBOLS)}]+$", t)  # stuck to the name: "Ozempic*"
+        if run:
+            flags |= _symbols(run.group(0), markers)
+            t = t[: run.start()].strip()
             changed = True
     return t, flags
 
@@ -164,7 +179,10 @@ def _ocr_marker(text: str, legend: Legend, cls: str | None) -> tuple[str, set[st
     return text, flags
 
 
-def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None) -> Row:
+def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None,
+             default_status: str | None = None) -> Row:  # fmt: skip
+    """A canonical row. ``default_status``: the status of every row in a table without a status
+    column, when the document says it (a preferred drug list that lists only preferred drugs)."""
     cells = r.cells
     text, markers = strip_markers(cells.get("drug", ""), legend)
     cls = match_class(r.drug_class) if r.drug_class else None
@@ -185,7 +203,7 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None) -> Row:
     roles = r.roles
     req = _requirements(cells.get("req", ""))
     if r.list_role:
-        row.status = r.list_role
+        row.status = "preferred" if r.list_role == "preferred_pa" else r.list_role
     elif "tier" in cells:
         row.tier, row.status = legend.tier(cells["tier"])
     elif "status" in cells:
@@ -194,6 +212,9 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None) -> Row:
         defined = {c for c, role in legend.codes.items() if role in DEFAULT_STATUS}
         if r.ocr and defined and len(code) <= 4 and code not in defined:
             row.review_reasons.append("status code not in the legend")  # "NF" read for "NP"
+    elif default_status and not roles & {"status", "tier", *LIST_ROLES}:
+        row.status = default_status
+        row.evidence += " / status: the list names only preferred drugs"
     if r.reread:
         row.review_reasons.append("status cell re-read from the scan")
     # a field is known when the table has a column for it, a requirements column, or a marker
@@ -206,7 +227,7 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None) -> Row:
             value = _flag(cells[f])
             if value is None:
                 unreadable.append(f)
-        if req.get(f) or f in markers:
+        if req.get(f) or f in markers or (f == "pa" and r.list_role == "preferred_pa"):
             value = True
         if value is None and known and f not in unreadable:
             value = False

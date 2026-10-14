@@ -96,7 +96,7 @@ jobs:
             case "$pages" in ''|*[!0-9,]*) echo "skipping $spec: pages must be numbers"; continue ;; esac
             for f in data/real/pdfs/*.pdf; do
               case "$(basename "$f")" in
-                *"$part"*) .venv/bin/python -m pdlwatch.cli inspect "$f" --pages "$pages" ;;
+                *"$part"*) .venv/bin/python -m pdlwatch.cli inspect "$f" --pages "$pages" --width 120 ;;
               esac
             done
           done

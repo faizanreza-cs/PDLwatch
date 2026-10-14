@@ -47,3 +47,38 @@ def test_one_symbol_read_for_two_markers_marks_both_lost():
         "* = Prior authorization required. + = Quantity limit applies. + = Step therapy applies."
     )  # a scan read † and ‡ both as "+"
     assert leg.codes == {"*": "pa"} and leg.lost == {"ql", "st"}
+
+
+def test_footnotes_at_the_foot_of_a_page():
+    """Oregon defines its symbols in footnotes on every page, beside a note in another column."""
+    from pdlwatch.extract.document import legend_text
+    from pdlwatch.pdf import Line, Page, Phrase, Word
+
+    def line(top: float, *cells: tuple[str, float]) -> Line:
+        def words(text: str, x: float) -> list[Word]:
+            return [Word(w, x + 30 * i, x + 30 * i + 25, top, top + 8)
+                    for i, w in enumerate(text.split())]  # fmt: skip
+
+        return Line([Phrase(words(text, x)) for text, x in cells])
+
+    page = Page(3, 612, 792, [
+        line(86, ("System", 43), ("Class", 124), ("Preferred", 380)),
+        line(705, ("* Drug coverage subject to meeting clinical prior authorization criteria", 43),
+             ("Note: New drugs are considered non-preferred until reviewed", 360)),
+        line(715, ("** Drug coverage subject to quantity limits", 43)),
+    ], False)  # fmt: skip
+    leg = parse(legend_text([page]))
+    assert leg.markers() == {"**": "ql", "*": "pa"}
+
+
+def test_a_preferred_drug_list_without_a_status_column_lists_preferred_drugs():
+    from pdlwatch.extract.document import _default_status
+    from pdlwatch.extract.layout import RawRow
+
+    def raw(*roles: str) -> RawRow:
+        return RawRow(1, "table", {"drug": "x"}, None, None, False, 100.0, "x", frozenset(roles))
+
+    head = "Florida Medicaid Preferred Drug List Effective October 1, 2026"
+    assert _default_status(head, [raw("drug", "class", "pa")]) == "preferred"
+    assert _default_status(head, [raw("drug", "pa"), raw("drug", "status")]) is None
+    assert _default_status("Prior Authorization Drug List", [raw("drug", "pa")]) is None
