@@ -1,5 +1,5 @@
 """Command line: ``pdlwatch corpus | build | extract | drug | state | changes | review | query |
-sql | ask | charts | export-powerbi | load | sync | audit | inspect | rxnorm``."""
+sql | ask | charts | export-powerbi | load | sync | audit | inspect | rxnorm | alerts``."""
 
 from __future__ import annotations
 
@@ -84,6 +84,11 @@ def main(argv: list[str] | None = None) -> int:
     au.add_argument("--seed", type=int, default=1)
     au.add_argument("--state")
     au.add_argument("--pdfs", help="folder of the PDFs (default: the synthetic corpus)")
+    al = sub.add_parser("alerts", help="changes a watchlist covers, rated; --send posts them once")
+    al.add_argument("--watchlist", type=Path, required=True)
+    al.add_argument("--all", action="store_true", help="include changes already sent")
+    al.add_argument("--send", action="store_true",
+                    help="post to PDLWATCH_ALERT_WEBHOOK and remember what was sent")  # fmt: skip
     rx = sub.add_parser("rxnorm", help="build the RxNorm name lexicon (NLM's free monthly release)")
     rx.add_argument("--out", type=Path, default=Path("data/real/cache/rxnorm.json"))
     rx.add_argument("--zip", type=Path, help="a release zip already downloaded")
@@ -121,6 +126,27 @@ def main(argv: list[str] | None = None) -> int:
         print(_summary(res))
         return 0
 
+    if args.cmd == "alerts":
+        from pdlwatch import alerts
+        from pdlwatch.warehouse import get_warehouse
+
+        wl = alerts.Watchlist.load(args.watchlist)
+        wh = get_warehouse()
+        found = alerts.match(wh.query("SELECT * FROM changes"),
+                             wh.query("SELECT product, ingredient FROM products"), wl)  # fmt: skip
+        ledger = alerts.ledger_path(get_settings().db_path)
+        if not args.all:
+            found = found[~found["key"].isin(alerts.sent_keys(ledger, wl.name))]
+        text = alerts.digest(found, wl)
+        print(text)
+        if args.send:
+            sure = found[found["confirmed"]]
+            if len(sure) and alerts.send(text):
+                alerts.record(ledger, wl.name, sure)
+                print(f"sent {len(sure)} alerts")
+            elif len(sure):
+                print("PDLWATCH_ALERT_WEBHOOK is not set: nothing sent")
+        return 0
     if args.cmd == "rxnorm":
         from collections import Counter
 

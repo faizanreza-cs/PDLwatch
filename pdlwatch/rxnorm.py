@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import zipfile
 from datetime import date, timedelta
 from functools import lru_cache
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Any
 
 URL = "https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_{d:%m%d%Y}.zip"
+FILES_PAGE = "https://www.nlm.nih.gov/research/umls/rxnorm/docs/rxnormfiles.html"
+_LINK = re.compile(r"https?://download\.nlm\.nih\.gov/[\w/]*RxNorm_full_prescribe_(\d{8})\.zip")
 # term types kept, best first when two share a name: an ingredient reading beats a brand
 TTYS = {"IN": "generic", "PIN": "generic", "MIN": "generic", "BN": "brand"}
 _MAX_WORDS = 6  # longest name looked for inside a cell
@@ -43,6 +46,22 @@ def release_dates(today: date | None = None, months: int = 3) -> list[date]:
     return out
 
 
+def candidate_urls(client: Any, today: date | None = None) -> list[str]:
+    """Release zips to try, newest first: the links on NLM's RxNorm files page, then the first
+    Monday of recent months and the day after (a holiday moves the release)."""
+    urls: list[str] = []
+    try:
+        page = client.get(FILES_PAGE)
+        if page.status_code == 200:
+            found = {m.group(0): m.group(1) for m in _LINK.finditer(page.text)}
+            urls += sorted(found, key=lambda u: found[u][4:] + found[u][:4], reverse=True)
+    except Exception:  # the page is a convenience: the dated guesses below still work
+        pass
+    for d in release_dates(today):
+        urls += [URL.format(d=d), URL.format(d=d + timedelta(days=1))]
+    return list(dict.fromkeys(urls))
+
+
 def download(folder: Path, client: Any = None, today: date | None = None) -> Path:
     """The newest release zip in ``folder``, downloading it when it isn't there yet."""
     import httpx
@@ -54,8 +73,7 @@ def download(folder: Path, client: Any = None, today: date | None = None) -> Pat
         headers={"User-Agent": "pdlwatch/0.1 (+https://github.com/faizanreza-cs/pdlwatch)"},
     )  # fmt: skip
     try:
-        for d in release_dates(today):
-            url = URL.format(d=d)
+        for url in candidate_urls(client, today):
             dest = folder / url.rsplit("/", 1)[-1]
             if dest.exists():
                 return dest
@@ -73,7 +91,9 @@ def download(folder: Path, client: Any = None, today: date | None = None) -> Pat
     finally:
         if own:
             client.close()
-    raise RuntimeError("no RxNorm prescribable release found for the last three months")
+    raise RuntimeError(
+        f"no RxNorm prescribable release found for the last three months (see {FILES_PAGE})"
+    )
 
 
 def build(zip_path: Path) -> dict[str, Any]:

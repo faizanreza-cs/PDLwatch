@@ -1,0 +1,6 @@
+# What one team watches. Any of products, ingredients and classes; states is optional (all when
+# left out). Run: pdlwatch alerts --watchlist watchlists/example.yaml
+name: GLP-1 and DPP-4 team
+products: [Ozempic, Mounjaro, Rybelsus, Trulicity]
+ingredients: [semaglutide, tirzepatide]
+classes: [DPP-4 Inhibitors]

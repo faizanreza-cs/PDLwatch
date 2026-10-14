@@ -80,12 +80,34 @@ def test_download_falls_back_to_last_months_release(release, tmp_path):
     seen = []
 
     def handler(req: httpx.Request) -> httpx.Response:
-        seen.append(req.url.path.rsplit("/", 1)[-1])
-        if req.url.path.endswith("09072026.zip"):
+        name = req.url.path.rsplit("/", 1)[-1]
+        seen.append(name)
+        if name == "rxnormfiles.html":
+            return httpx.Response(503)
+        if name == "RxNorm_full_prescribe_09082026.zip":  # Labor Day moved the release
             return httpx.Response(200, content=release.read_bytes())
         return httpx.Response(404)
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         got = rxnorm.download(tmp_path / "dl", client, today=date(2026, 10, 14))
-    assert got.name == "RxNorm_full_prescribe_09072026.zip" and zipfile.is_zipfile(got)
-    assert seen == ["RxNorm_full_prescribe_10052026.zip", "RxNorm_full_prescribe_09072026.zip"]
+    assert got.name == "RxNorm_full_prescribe_09082026.zip" and zipfile.is_zipfile(got)
+    assert seen == ["rxnormfiles.html", "RxNorm_full_prescribe_10052026.zip",
+                    "RxNorm_full_prescribe_10062026.zip", "RxNorm_full_prescribe_09072026.zip",
+                    "RxNorm_full_prescribe_09082026.zip"]  # fmt: skip
+
+
+def test_the_files_page_links_come_first(release, tmp_path):
+    page = (
+        '<a href="https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_09082026.zip">'
+        '<a href="https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_10052026.zip">'
+    )
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=page)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        urls = rxnorm.candidate_urls(client, today=date(2026, 10, 14))
+    assert urls[:2] == [
+        "https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_10052026.zip",
+        "https://download.nlm.nih.gov/rxnorm/RxNorm_full_prescribe_09082026.zip",
+    ]
