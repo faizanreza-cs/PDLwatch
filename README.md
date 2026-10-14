@@ -1,10 +1,22 @@
-# PDLwatch Overview
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/logo-dark.svg">
+  <img src="docs/img/logo.svg" alt="PDLwatch" height="100">
+</picture>
+
+<p><em>State Medicaid preferred drug lists, read from PDFs and tracked over time.</em></p>
 
 [![CI](https://github.com/faizanreza-cs/pdlwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/faizanreza-cs/pdlwatch/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![SQL](https://img.shields.io/badge/SQL-Snowflake-29b5e8)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2)](https://www.linkedin.com/in/YOUR-LINKEDIN-ID)
+[![X](https://img.shields.io/badge/X-Follow-000000?logo=x&logoColor=white)](https://x.com/YOUR_X_HANDLE)
+
+</div>
+
+## ⚡ Overview
 
 A drug maker's market access team needs to know, for each brand and each state Medicaid program:
 is it preferred, does it need prior authorization, step therapy or a quantity limit, and what
@@ -144,13 +156,11 @@ Azure OpenAI.
 | Extraction (`extract/`) | Header-anchored tables and lists, legends, prose rules, LLM extraction with grounding, confidence and review reasons | Python, rapidfuzz, LLM APIs |
 | Drug dictionary (`drugs.py`) | 193 products in 20 therapeutic classes, aliases, OCR-tolerant matching | rapidfuzz |
 | Evaluation (`evaluate.py`, `changes.py`) | Row recall and precision, field accuracy, accepted error rate by layout and for scans; change detection against the truth | pandas |
+| History (`history.py`) | Each drug's status in force on any date, one interval per PDL version, with its source | pandas |
 | Warehouse and saved queries (`warehouse.py`, `sql/`) | Seven tables; state scorecard, class landscape, brand over generic, quarterly changes, review backlog, extraction by document | Snowflake SQL, run locally on DuckDB via sqlglot |
 | Access Copilot (`agent/`) | Tool-using agent that cites document and page | Anthropic, OpenAI, Azure OpenAI, or offline mock |
 | API (`api.py`) | `/drugs`, `/states`, `/classes`, `/changes`, `/review`, `/documents`, `/metrics`, `/queries`, `POST /extract` for one uploaded PDF, `POST /ask` | FastAPI |
-| Real PDLs (`realdata.py`, `audit.py`, `sources/`) | Polite downloader for public state PDLs, and an audit printout to check rows against their source line | httpx |
-| Power BI kit (`powerbi/`) | Star-schema export, DAX measures, theme, page guide | Power BI |
-| Dataiku kit (`dataiku/`) | Flow from a folder of PDFs to the tables, with SQL recipes | Dataiku |
-| Copilot Studio (`copilot/`, `docs/copilot-studio.md`) | OpenAPI connector so a Copilot Studio agent can call the Access Copilot | Microsoft Copilot Studio |
+| Real PDLs (`realdata.py`, `cache.py`, `audit.py`, `sources/`) | Polite downloader that keeps every version by content and fetches only what changed, an extraction cache so a run only extracts new PDFs, and an audit printout to check rows against their source line | httpx |
 
 ```mermaid
 flowchart LR
@@ -164,9 +174,7 @@ flowchart LR
     S -- accepted --> WH[(Warehouse<br/>DuckDB or Snowflake)]
     S -- not sure --> RQ[review queue] --> WH
     WH --> CH[changes between versions]
-    WH --> AG[Access Copilot] --> API[FastAPI] --> CS[Copilot Studio / Teams]
-    WH --> PBI[Power BI kit]
-    PDF --> DKU[Dataiku flow]
+    WH --> AG[Access Copilot] --> API[FastAPI]
 ```
 
 ## Quickstart
@@ -176,6 +184,7 @@ git clone https://github.com/faizanreza-cs/pdlwatch && cd pdlwatch
 make setup                                      # OCR also needs the tesseract binary
 make build                                      # generate the corpus, extract it, score it
 pdlwatch drug semaglutide                      # every semaglutide product, every state
+pdlwatch drug Ozempic --as-of 2026-08-15       # the status in force on a date
 pdlwatch state Ohio --class GLP-1              # one state's list for one class
 pdlwatch changes --state TX                    # what changed between versions
 pdlwatch review --out review.csv               # the review queue, with sources
@@ -200,42 +209,23 @@ Or with Docker: `docker build -t pdlwatch . && docker run -p 8000:8000 pdlwatch`
 PDFs or pages from 20 states (Colorado, Florida, Illinois, Iowa, Maryland, Mississippi, Ohio,
 Oregon, Texas and others), including several past versions per state for change detection.
 `pdlwatch sync` downloads them politely (robots.txt honoured, one request per second per host,
-a User-Agent that names the project, PDFs only) and runs the same extraction. There's no truth
-to score against, so `pdlwatch audit` prints a random sample of accepted rows beside the line
-and header they were read from, to check by eye.
+a User-Agent that names the project, PDFs only) and runs the same extraction. Files are kept by
+content, so a new version posted under the same address sits beside the old one, and the next
+sync asks each server whether a file changed before downloading it. There's no truth to score
+against, so `pdlwatch audit` prints a random sample of accepted rows beside the line and header
+they were read from, to check by eye.
 
 It runs as a manual GitHub Actions workflow (**Actions > Real data (state Medicaid PDLs) > Run
-workflow**), which
-prints the results and the audit sample in the log and keeps them as an artifact. State sites
-rename files every quarter; a link that fails is reported in the log as a line to update.
+workflow**), which prints the results and the audit sample in the log and keeps the archive
+between runs. State sites rename files every quarter; a link that fails is reported in the log
+as a line to update.
 
-## Snowflake
+## Integrations
 
-All SQL is written in Snowflake's dialect. CI runs every query on DuckDB through sqlglot's
-translation; on Snowflake the same files run unchanged.
-
-1. Run [`snowflake/setup.sql`](snowflake/setup.sql). It creates a warehouse, a database, a loader
-   role and a **read-only analyst role** for the agent, API, Power BI and Dataiku.
-2. `pip install "pdlwatch[snowflake]"`, set `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`,
-   `SNOWFLAKE_PASSWORD` (or `SNOWFLAKE_PRIVATE_KEY_FILE`), `SNOWFLAKE_ROLE=PDLWATCH_LOADER` and
-   `SNOWFLAKE_WAREHOUSE=PDLWATCH_WH`, then run `pdlwatch load`.
-3. Switch to the analyst role and `PDLWATCH_BACKEND=snowflake`. Saved queries, `pdlwatch sql`,
-   the API and the agent then run against Snowflake.
-
-## Power BI, Dataiku and Copilot Studio
-
-- **Power BI:** `pdlwatch export-powerbi` writes the star schema to `powerbi/data/`.
-  [`powerbi/README.md`](powerbi/README.md) lists the relationships and the pages (drug access
-  map, class landscape, quarterly changes, review and quality), the DAX measures
-  ([`measures.dax`](powerbi/measures.dax)) and the theme ([`theme.json`](powerbi/theme.json)).
-- **Dataiku:** [`dataiku/README.md`](dataiku/README.md) gives the flow: a managed folder of
-  PDFs, one Python recipe that extracts them, SQL recipes for the reports, and a scenario that
-  emails the access team when a new version changes something. The recipe is a thin wrapper
-  around the tested library.
-- **Copilot Studio:** [`docs/copilot-studio.md`](docs/copilot-studio.md) adds the Access Copilot
-  and the drug, state and change lookups to a Copilot Studio agent through a custom connector
-  ([`copilot/access-copilot.swagger.json`](copilot/access-copilot.swagger.json)), so the field
-  and access teams can ask in Teams.
+The same SQL runs on Snowflake ([`snowflake/setup.sql`](snowflake/setup.sql) creates a read-only
+role for the agent and API), and the repo carries starter kits for
+[Power BI](powerbi/README.md), [Dataiku](dataiku/README.md) and
+[Copilot Studio](docs/copilot-studio.md). The kits aren't run in CI.
 
 ## Guardrails
 
@@ -254,23 +244,15 @@ translation; on Snowflake the same files run unchanged.
 
 ## Tests and evals
 
-- **114 tests**, all offline:
-  - Table and list parsing on hand-built pages: wrapped cells, two-line headers, unknown
-    columns, markers on their own line, headers OCR damaged, and drugs the dictionary doesn't
-    know (a row is never mistaken for a header, a generic is never glued to the drug above).
-  - Legends, markers, Medicaid rules, the review reasons for scans, prose rules, change
-    detection, drug matching and OCR folds.
-  - The pipeline end to end on a small corpus (one PDF per layout, a version pair and a scan),
-    with thresholds per layout, OCR with deskew, and a broken PDF that is reported while the
-    rest are extracted.
-  - The agent's routing, tools and SQL guard, the providers and structured outputs with fake
-    clients, the LLM extractor's grounding and agreement checks, the API (uploads included), and
-    the downloader against a fake server (robots.txt, missing files, HTML instead of PDF).
-  - The Power BI measures against the exported columns, the connector against the API, the
-    Dataiku recipe against the library, every saved query, and the charts.
-- **Agent eval** (`make eval`): 21 golden questions with the expected tool and the facts each
-  answer must contain, read from the warehouse at eval time. The offline mock passes 21/21, which
-  checks the tools and routing; `make eval-llm` scores a real model on the same questions.
+**124 offline tests** cover table and list parsing on hand-built pages (including drugs the
+dictionary doesn't know), legends and Medicaid rules, review reasons for scans, change detection
+and point-in-time history, the extraction cache and the downloader against a fake server
+(unchanged files, new versions under the same address), the pipeline end to end on a small corpus,
+the agent, SQL guard, LLM grounding checks and the API.
+
+**Agent eval** (`make eval`): 21 golden questions with the expected tool and the facts each answer
+must contain, read from the data at eval time. The offline mock passes 21/21, which checks the
+tools and routing; `make eval-llm` scores a real model on the same questions.
 
 ## Limitations
 
@@ -285,32 +267,6 @@ translation; on Snowflake the same files run unchanged.
   flags.
 - **The drug dictionary is hand-built** (193 products in 20 classes). Production use would map to
   RxNorm or NDC codes.
-- **Not run in CI:** the Snowflake loader, the Dataiku recipe, the Power BI report and the LLM
-  path. They use the same tested code and SQL.
-
-```
-pdlwatch/
-  synth/            corpus generator with ground truth (truth, prose, render, corpus)
-  pdf.py            words, lines and phrases from the text layer or OCR
-  extract/          layout (tables, lists), legend, rows (rules, scoring), prose, llm, document
-  drugs.py          drug dictionary and matching
-  evaluate.py       extraction metrics against the truth
-  changes.py        changes between versions
-  pipeline.py       build -> warehouse + results.json
-  warehouse.py      DuckDB / Snowflake backends
-  sql/*.sql         saved queries (Snowflake SQL)
-  agent/            Access Copilot: providers, tools, SQL guard, loop
-  evals/            golden questions + runner
-  realdata.py · audit.py · api.py · cli.py · charts.py · powerbi.py
-sources/  powerbi/  dataiku/  copilot/  snowflake/  docs/
-```
-
-## Need this for your team?
-
-I build document AI and analytics for pharma market access and commercial teams: PDF
-extraction pipelines, payer coverage tracking, and AI assistants grounded in your data.
-
-**Faizan Reza**, AI engineer · [GitHub](https://github.com/faizanreza-cs) · faizanreza01@gmail.com
 
 ## License
 
