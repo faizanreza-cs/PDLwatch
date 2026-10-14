@@ -3,8 +3,11 @@ from pdlwatch.pdf import Line, Page, Phrase, Word
 
 
 def _page(*texts: str) -> Page:
-    lines = [Line([Phrase([Word(w, 50 + 30 * k, 75 + 30 * k, 100 + 12 * i, 109 + 12 * i)
-                           for k, w in enumerate(t.split())])]) for i, t in enumerate(texts)]  # fmt: skip
+    lines = []
+    for i, t in enumerate(texts):
+        top = 100 + 12 * i
+        words = [Word(w, 50 + 30 * k, 75 + 30 * k, top, top + 9) for k, w in enumerate(t.split())]
+        lines.append(Line([Phrase(words)]))
     return Page(1, 612, 792, lines, False)
 
 

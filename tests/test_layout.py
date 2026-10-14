@@ -167,7 +167,10 @@ def test_a_bullet_starts_a_new_item_and_is_not_part_of_the_name():
     )
     rows, _ = layout.parse([page])
     assert [r.cells["drug"] for r in rows] == [
-        "Odefsey (emtricitabine/rilpivirine/tenofovir AF)", "Genvoya (elvitegravir/", "Biktarvy"]
+        "Odefsey (emtricitabine/rilpivirine/tenofovir AF)",
+        "Genvoya (elvitegravir/",
+        "Biktarvy",
+    ]
 
 
 def test_criteria_and_notes_in_list_columns_are_not_drugs():
@@ -182,7 +185,10 @@ def test_criteria_and_notes_in_list_columns_are_not_drugs():
     )
     rows, _ = layout.parse([page])
     assert [r.cells["drug"] for r in rows] == [
-        "Nicotine Gum", "Varenicline (Limited to 18 years and older)", "Nicotine Lozenge"]
+        "Nicotine Gum",
+        "Varenicline (Limited to 18 years and older)",
+        "Nicotine Lozenge",
+    ]
     assert rows[1].cells["ql"] == "QTY LIMIT: 2 tablets/day"
 
 
@@ -217,10 +223,16 @@ def test_bulleted_lists_with_notes_and_columns_that_move_from_page_to_page():
                    ("PA CRITERIA", 677))  # fmt: skip
     p1 = _page(
         header,
-        _line(115, ("Anticoagulants", 45), ("•", 201), ("Eliquis", 219), ("•", 427),
-              ("Savaysa", 445)),  # fmt: skip
-        _line(127, ("o", 219), ("QL – 2 tabs/day of 2.5mg; 4 tabs/day for 7 days,", 237),
-              ("o", 445), ("ST – must have trialed Eliquis and Xarelto OR", 463)),  # fmt: skip
+        _line(
+            115, ("Anticoagulants", 45), ("•", 201), ("Eliquis", 219), ("•", 427), ("Savaysa", 445)
+        ),  # fmt: skip
+        _line(
+            127,
+            ("o", 219),
+            ("QL – 2 tabs/day of 2.5mg; 4 tabs/day for 7 days,", 237),
+            ("o", 445),
+            ("ST – must have trialed Eliquis and Xarelto OR", 463),
+        ),  # fmt: skip
         _line(139, ("then 2 tabs/day for 5mg", 237), ("medical justification for use", 463)),
         _line(151, ("•", 201), ("warfarin", 219), ("•", 427), ("Bevyxxa", 445)),
         _line(163, ("•", 201), ("Xarelto 10mg tablets", 219), ("•", 427), ("dabigatran", 445)),
@@ -251,8 +263,9 @@ def test_superscripts_titles_across_columns_and_other_tables():
     """New York: ® set apart with a footnote number, class titles centred across the columns,
     and a dose optimization table that isn't a list of statuses."""
     page = _page(
-        _line(100, ("Preferred Drugs", 78), ("Non-Preferred Drugs", 245),
-              ("Coverage Parameters", 515)),  # fmt: skip
+        _line(
+            100, ("Preferred Drugs", 78), ("Non-Preferred Drugs", 245), ("Coverage Parameters", 515)
+        ),  # fmt: skip
         _line(115, ("Antipsychotics – Second Generation CC, ST", 277)),
         _line(130, ("Taltz", 37), ("Nucala", 219), ("CLINICAL CRITERIA (CC)", 400)),
         _line(136, ("®", 60), ("1", 66), ("®", 250), ("2", 256)),
@@ -271,8 +284,8 @@ def test_superscripts_titles_across_columns_and_other_tables():
 
 def test_a_non_preferred_column_named_with_its_rule():
     """Maryland: "Non-Preferred / Requires Prior Authorization"."""
-    lay = layout.header(_line(100, ("Drug Class", 35), ("Preferred", 169),
-                              ("Non-Preferred / Requires Prior Authorization", 367)), 612)  # fmt: skip
+    md = "Non-Preferred / Requires Prior Authorization"
+    lay = layout.header(_line(100, ("Drug Class", 35), ("Preferred", 169), (md, 367)), 612)
     assert lay is not None and lay.mode == "list"
     assert [c.role for c in lay.columns] == ["class", "preferred", "non_preferred"]
 
