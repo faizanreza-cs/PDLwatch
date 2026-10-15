@@ -319,7 +319,7 @@ in CI.
 
 ## Tests and evals
 
-**187 offline tests** cover table and list parsing on hand-built pages (including layouts
+**188 offline tests** cover table and list parsing on hand-built pages (including layouts
 copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns,
 two tables side by side), lists published as workbooks and read through source profiles,
 legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they

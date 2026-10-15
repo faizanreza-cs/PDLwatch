@@ -22,6 +22,16 @@ def test_markers_come_off_the_name_and_become_flags():
     assert strip_markers("Januvia BvG", MARKERS) == ("Januvia", {"bvg"})
 
 
+def test_codes_printed_as_superscripts_come_off_the_word_they_touch():
+    # Pennsylvania prints PA and QL as superscripts, which the text layer glues to the word
+    assert strip_markers("Duavee TabletQL", MARKERS) == ("Duavee Tablet", {"ql"})
+    assert strip_markers("AlphanatePA", MARKERS) == ("Alphanate", {"pa"})
+    assert strip_markers("Zavesca CapsulePA QL", MARKERS) == ("Zavesca Capsule", {"pa", "ql"})
+    assert strip_markers("Duavee TabletQL", MARKERS, glued=False)[1] == set()  # a scan: OCR checks
+    for name in ("NovoLog", "ZyPREXA", "ClonazePAM", "Basaglar KwikPen", "Toprol XL", "PA"):
+        assert strip_markers(name, MARKERS) == ((name, set()) if name != "PA" else ("", {"pa"}))
+
+
 def test_non_preferred_means_prior_authorization():
     r = from_raw(_raw("Mounjaro", "non_preferred"), MARKERS, "d", "OH")
     assert (r.status, r.pa, r.ql) == ("non_preferred", True, False)

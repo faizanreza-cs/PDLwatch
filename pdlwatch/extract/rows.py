@@ -136,9 +136,11 @@ def undefined_symbols(text: str, legend: Legend) -> set[str]:
     return out
 
 
-def strip_markers(text: str, legend: Legend) -> tuple[str, set[str]]:
+def strip_markers(text: str, legend: Legend, glued: bool = True) -> tuple[str, set[str]]:
     """'Ozempic CC QL' -> ('Ozempic', {'pa', 'ql'}) using the document's legend; footnote symbols
-    are read wherever they stand ("codeine sulfate * TABLET", "sumatriptan**")."""
+    are read wherever they stand ("codeine sulfate * TABLET", "sumatriptan**"). With ``glued``,
+    so are capital codes a text layer joined to the word before them ("Duavee TabletQL"); a
+    scan's letters are left to the OCR checks."""
     flags: set[str] = set()
     t = re.sub(r"(?<=\w),\s*(?=[a-z/]{1,5}(,|\s*$))", " ", text.strip(), flags=re.I)  # "cc,ql"
     markers = dict(sorted({**_DEFAULT_MARKERS, **legend.markers()}.items(),
@@ -152,7 +154,10 @@ def strip_markers(text: str, legend: Legend) -> tuple[str, set[str]]:
         for code, flag in markers.items():
             if code[0] in _SYMBOLS:
                 continue
-            if t.lower().endswith(" " + code) or t.lower() == code:
+            n = len(code)
+            stuck = (glued and code.isalpha() and t.endswith(code.upper()) and len(t) > n + 2
+                     and t[-n - 3 : -n].isalpha() and t[-n - 1].islower())  # fmt: skip
+            if t.lower().endswith(" " + code) or t.lower() == code or stuck:
                 t = t[: len(t) - len(code)].strip()
                 flags.add(flag)
                 changed = True
@@ -200,7 +205,7 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None,
     """A canonical row. ``default_status``: the status of every row in a table without a status
     column, when the document says it (a preferred drug list that lists only preferred drugs)."""
     cells = r.cells
-    text, markers = strip_markers(cells.get("drug", ""), legend)
+    text, markers = strip_markers(cells.get("drug", ""), legend, glued=not r.ocr)
     cls = match_class(r.drug_class) if r.drug_class else None
     ocr_symbols = False
     if r.ocr:
