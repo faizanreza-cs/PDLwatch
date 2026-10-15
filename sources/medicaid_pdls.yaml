@@ -128,6 +128,12 @@
   match: "(?i)statewide|pdl"
   max: 2
 - state: PA
+  title: Pennsylvania statewide PDL page (papdl.com)
+  page: https://www.papdl.com/preferred-drug-list.html
+  match: "(?i)preferred drug list|pdl"
+  newest_first: true
+  max: 2
+- state: PA
   title: Pennsylvania statewide PDL, January 2024 (v5)
   url: https://www.dhs.pa.gov/providers/Providers/Documents/Pharmacy%20Services/Penn-Statewide-PDL-2024-v5.pdf
 
@@ -167,8 +173,9 @@
   match: "(?i)apple-health-pdl-20[0-9]{6}"  # one dated workbook per week; the PDF is from 2020
   newest_first: true
   max: 2
-  # one row per package (NDC) in 23 coded columns: the drugs on the PDL (AHPDL inclusion Y),
-  # with the pharmacy benefit's status (P / N) and PA (Y / N); the medical benefit's are left
+  # one row per package (NDC) in 23 coded columns: the drugs on the PDL (AHPDL inclusion Y)
+  # with a pharmacy status (P / N; X marks products the pharmacy benefit doesn't cover:
+  # over-the-counter items, vitamins, medical-only drugs) and the pharmacy benefit's PA (Y / N)
   profile:
     columns:
       APPLE HEALTH DRUG CLASS: Drug Class
@@ -177,6 +184,7 @@
       PHARMACY PA STATUS: PA Status
     rows:
       AHPDL INCLUSION: "Y"
+      PHARMACY PREFERRED STATUS: ["P", "N"]
 
 - state: WV
   title: West Virginia Medicaid PDL page

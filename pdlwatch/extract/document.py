@@ -71,7 +71,8 @@ class DocResult:
             "methods": dict(methods), "seconds": round(self.seconds, 2),
             "llm_calls": self.llm_calls, "sha256": self.sha256,
             "effective_from": self.effective_from, "first_seen": self.first_seen,
-            "profile": json.dumps(self.profile, sort_keys=True) if self.profile else None,
+            # as written: its column order is the layout the audit re-creates
+            "profile": json.dumps(self.profile) if self.profile else None,
         }  # fmt: skip
 
 

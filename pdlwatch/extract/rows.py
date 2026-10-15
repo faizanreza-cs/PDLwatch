@@ -286,8 +286,12 @@ def from_raw(r: RawRow, legend: Legend, doc_id: str, state: str | None,
                 if r.ocr
                 else "words beside the name the dictionary doesn't know"
             )
-    if row.status == "non_preferred":
-        row.pa = True  # Medicaid: non-preferred drugs need prior authorisation
+    # Medicaid: non-preferred drugs need prior authorisation, unless the document's own PA
+    # column says no ("N" beside a non-preferred drug in Washington's list); a scan can misread
+    # that cell, so there the rule stands
+    said_no = bool(cells.get("pa", "").strip()) and _flag(cells["pa"]) is False and not r.ocr
+    if row.status == "non_preferred" and not said_no:
+        row.pa = True
     if row.status == "not_covered":
         row.pa = row.st = False
     for f in unreadable:

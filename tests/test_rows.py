@@ -27,6 +27,15 @@ def test_non_preferred_means_prior_authorization():
     assert (r.status, r.pa, r.ql) == ("non_preferred", True, False)
 
 
+def test_a_pa_column_that_says_no_stands_unless_the_row_was_scanned():
+    # Washington lists some non-preferred drugs with "N" in its own PA column
+    said = from_raw(_raw("Mounjaro", None, status="N", pa="N"), MARKERS, "d", "WA")
+    assert (said.status, said.pa) == ("non_preferred", False)
+    scanned = from_raw(_raw("Mounjaro", None, ocr=True, status="N", pa="N"), MARKERS, "d", "WA")
+    assert scanned.pa is True  # a scan can misread the cell: the Medicaid rule stands
+    assert from_raw(_raw("Mounjaro", None, status="NP"), MARKERS, "d", "WA").pa is True
+
+
 def test_an_unexpressed_field_is_unknown_not_false():
     plain = parse("")  # no markers: the list can't say anything about QL
     r = from_raw(_raw("Ozempic"), plain, "d", "OH")

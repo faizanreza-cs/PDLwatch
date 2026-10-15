@@ -104,7 +104,7 @@ WA_HEADER = ["PRODUCT IDENTIFIER", "IDENTIFIER TYPE", "APPLE HEALTH DRUG CLASS",
 WA_PROFILE = {
     "columns": {"APPLE HEALTH DRUG CLASS": "Drug Class", "LABEL NAME": "Drug Name",
                 "PHARMACY PREFERRED STATUS": "Preferred Status", "PHARMACY PA STATUS": "PA Status"},
-    "rows": {"AHPDL INCLUSION": "Y"},
+    "rows": {"AHPDL INCLUSION": "Y", "PHARMACY PREFERRED STATUS": ["P", "N"]},
 }  # fmt: skip
 GLP1 = "ANTIDIABETICS : GLP-1 RECEPTOR AGONISTS"
 
@@ -114,7 +114,8 @@ def _package(ndc, cls, label, strength, on_pdl, status, pa, medical_pa=None):
             "CP", None, "X", medical_pa, status, None, None, pa, "N", "NOTYPE", None]  # fmt: skip
 
 
-def _wa_workbook(path):
+def _wa_workbook(path, packages=0):
+    """``packages``: more packages of Ozempic, for a sheet too long to show in full."""
     wb = Workbook()
     ws = wb.active
     for title in ("Apple Health (Medicaid) Preferred Drug List",
@@ -129,10 +130,21 @@ def _wa_workbook(path):
         _package("00169406013", GLP1, "VICTOZA", "18 MG/3 ML", "Y", "P", "N", medical_pa="Y"),
         _package("81968035101", "ADHD / ANTI-NARCOLEPSY : DNRIS", "SUNOSI", "150 MG", "Y",
                  "N", "Y"),
+        _package("49502080661", "ASTHMA AND COPD AGENTS : LAMAS", "YUPELRI", "175 MCG", "Y",
+                 "N", "N"),  # non-preferred, and the PA column says no
+        _package("00283600730", "VITAMINS : CALCIUM", "CITRACAL-D3", "315 MG", "Y", "X", "N"),
         _package("00093310905", "ANTIBIOTICS : PENICILLINS", "AMOXICILLIN", "500 MG", "N",
                  "X", "N"),
     ]:  # fmt: skip
         ws.append(row)
+    for i in range(packages):
+        ws.append(_package(f"0016941{i:04d}", GLP1, "OZEMPIC", "2 MG/DOSE", "Y", "P", "N"))
+    key = wb.create_sheet("KEY")  # a key to the codes, as Washington's workbook has
+    key.append(WA_HEADER)
+    meaning = [None] * len(WA_HEADER)
+    meaning[10] = "Y = Product is included in the AHPDL N = Product is not"
+    meaning[16] = "P = Preferred N = Non-Preferred X = Not covered by the pharmacy benefit"
+    key.append(meaning)
     wb.save(path)
     return path
 
@@ -142,12 +154,14 @@ def test_a_package_level_workbook_reads_through_its_source_profile(tmp_path):
     assert extract_document(path, state="WA").rows == []  # as filed, it has no header we know
     doc = extract_document(path, state="WA", profile=WA_PROFILE)
     # the pharmacy benefit's status and PA, not the medical benefit's (Victoza's medical PA);
-    # the drug off the PDL is left out, and a product's packages make one row
+    # the drug off the PDL and the vitamin the pharmacy benefit doesn't cover are left out, a
+    # product's packages make one row, and an explicit "N" for PA stands (Yupelri)
     assert {r.drug_text: (r.status, r.pa) for r in doc.rows} == {
         "OZEMPIC": ("preferred", False),
         "TRULICITY": ("non_preferred", True),
         "VICTOZA": ("preferred", False),
         "SUNOSI": ("non_preferred", True),
+        "YUPELRI": ("non_preferred", False),
     }
     assert all(r.accepted for r in doc.rows if r.product in {"Ozempic", "Trulicity", "Victoza"})
     assert doc.effective == "2026-10-01" and doc.profile == WA_PROFILE
@@ -160,12 +174,16 @@ def test_profiles_are_checked_and_columns_listed_to_write_one(tmp_path):
     ) == [  # fmt: skip
         "unknown profile key 'pages'",
         "'Medicine' is not a header the parser reads",
-        "profile rows must map names to text (quote Y and N)",
+        "profile rows must map names to a value or a list of them (quote Y and N)",
     ]
-    out = columns(_wa_workbook(tmp_path / "wa.xlsx"))
-    assert out[0] == "sheet Sheet: 6 rows under the header on row 4"
-    assert "  AHPDL INCLUSION: 2 values; Y 5, N 1" in out
-    assert "  PHARMACY PREFERRED STATUS: 3 values; P 3, N 2, X 1" in out
+    out = columns(_wa_workbook(tmp_path / "wa.xlsx", packages=30))
+    assert out[0] == "sheet Sheet: 38 rows under the header on row 4"
+    assert "  AHPDL INCLUSION: 2 values; Y 37, N 1" in out
+    assert "  PHARMACY PREFERRED STATUS: 3 values; P 33, N 3, X 2" in out
+    # the key sheet, short, in full
+    assert "sheet KEY: 2 rows, every filled cell" in out
+    assert ("  PHARMACY PREFERRED STATUS: P = Preferred N = Non-Preferred X = Not covered by the "
+            "pharmacy benefit") in out  # fmt: skip
 
 
 def test_the_audit_finds_a_profiled_row_beside_its_header(tmp_path):
@@ -196,11 +214,12 @@ def test_a_workbook_read_through_another_profile_is_extracted_again(tmp_path):
         return run_folder(folder, s, {stem: "WA"}, workers=1, profiles={stem: profile})
 
     first, again = run(WA_PROFILE), run(WA_PROFILE)
-    assert first["data"]["rows"] == 4 and first["cache"] == {"from_cache": 0, "extracted": 1}
+    assert first["data"]["rows"] == 5 and first["cache"] == {"from_cache": 0, "extracted": 1}
     assert again["cache"] == {"from_cache": 1, "extracted": 0}
     wider = {**WA_PROFILE, "rows": {}}  # the drugs off the PDL too
     third = run(wider)
     assert third["cache"] == {"from_cache": 0, "extracted": 1}
     assert third["data"]["rows"] > first["data"]["rows"]
     docs = DuckDBWarehouse(s.db_path).query("SELECT profile FROM documents")
-    assert json.loads(docs["profile"][0]) == wider  # each document says how it was read
+    kept = json.loads(docs["profile"][0])  # each document says how it was read,
+    assert kept == wider and list(kept["columns"]) == list(wider["columns"])  # in its order

@@ -29,7 +29,7 @@ COLUMN_WIDTH = 120.0
 ROW_HEIGHT = 20.0  # far enough apart that no two rows read as one wrapped header
 
 
-Profile = dict[str, dict[str, str]]
+Profile = dict[str, dict[str, Any]]
 PROFILE_KEYS = ("columns", "rows")
 
 
@@ -48,16 +48,22 @@ def check_profile(profile: Any) -> list[str]:
 
     if not isinstance(profile, dict) or not profile.get("columns"):
         return ["a profile needs columns: {spreadsheet header: header the parser reads}"]
+
+    def text(v: Any) -> bool:
+        return isinstance(v, str)
+
     errors = [f"unknown profile key {k!r}" for k in profile if k not in PROFILE_KEYS]
-    for key in PROFILE_KEYS:
-        given = profile.get(key, {})
-        if not isinstance(given, dict) or not all(
-            isinstance(k, str) and isinstance(v, str) for k, v in given.items()
-        ):
-            errors.append(f"profile {key} must map names to text (quote Y and N)")
-        elif key == "columns":
-            errors += [f"{v!r} is not a header the parser reads" for v in given.values()
-                       if layout.role(v) is None]  # fmt: skip
+    columns, rows = profile.get("columns"), profile.get("rows", {})
+    if not isinstance(columns, dict) or not all(text(k) and text(v) for k, v in columns.items()):
+        errors.append("profile columns must map names to text")
+    else:
+        errors += [f"{v!r} is not a header the parser reads" for v in columns.values()
+                   if layout.role(v) is None]  # fmt: skip
+    if not isinstance(rows, dict) or not all(
+        text(k) and (text(v) or (isinstance(v, list) and v and all(map(text, v))))
+        for k, v in rows.items()
+    ):
+        errors.append("profile rows must map names to a value or a list of them (quote Y and N)")
     return errors
 
 
@@ -67,7 +73,8 @@ def _profiled(rows: list[list[str]], profile: Profile) -> list[list[str]]:
     rows its filters keep, each distinct row once. A sheet without the profile's header (a notes
     sheet) is returned as it is."""
     cols = {_name(k): v for k, v in profile["columns"].items()}
-    where = {_name(k): _name(v) for k, v in profile.get("rows", {}).items()}
+    where = {_name(k): {_name(x) for x in (v if isinstance(v, list) else [v])}
+             for k, v in profile.get("rows", {}).items()}  # fmt: skip
     at = next((i for i, row in enumerate(rows) if {*cols, *where} <= {_name(c) for c in row}),
               None)  # fmt: skip
     if at is None:
@@ -79,7 +86,7 @@ def _profiled(rows: list[list[str]], profile: Profile) -> list[list[str]]:
     seen: set[tuple[str, ...]] = set()
     for row in rows[at + 1 :]:
         cells = row + [""] * (len(names) - len(row))
-        if any(_name(cells[j]) != v for j, v in tests):
+        if any(_name(cells[j]) not in allowed for j, allowed in tests):
             continue
         kept = tuple(cells[j] for j in pick)
         if any(kept) and kept not in seen:  # every package of a product line: one row
@@ -88,12 +95,24 @@ def _profiled(rows: list[list[str]], profile: Profile) -> list[list[str]]:
     return out
 
 
+SMALL_SHEET = 30  # rows: a key or notes sheet, shown in full rather than summarised
+
+
 def columns(path: str | Path, top: int = 5) -> list[str]:
     """Each sheet's columns: the header, how many different values the column holds and the most
     common ones, to write a source profile from. The header is the opening row with the most
-    filled cells."""
+    filled cells. A small sheet (a key to the codes, notes) is shown cell by cell, in full."""
     out = []
     for sheet, rows in _tables(Path(path)):
+        if len(rows) <= SMALL_SHEET:
+            out.append(f"sheet {sheet}: {len(rows)} rows, every filled cell")
+            out.append("  " + " | ".join(c for c in rows[0] if c))
+            for row in rows[1:]:
+                for j, cell in enumerate(row):
+                    head = rows[0][j] if j < len(rows[0]) and rows[0][j] else f"column {j + 1}"
+                    if cell:
+                        out.append(f"  {head}: {cell}")
+            continue
         at = max(range(min(len(rows), 30)), key=lambda i: (sum(map(bool, rows[i])), -i))
         body = rows[at + 1 :]
         out.append(f"sheet {sheet}: {len(body):,} rows under the header on row {at + 1}")

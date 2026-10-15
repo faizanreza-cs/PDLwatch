@@ -55,8 +55,9 @@ def _code_hash() -> str:
 
 
 def profile_key(profile: dict[str, Any]) -> str:
-    """A short hash of a source profile: a file read through another profile is another entry."""
-    return hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()[:12]
+    """A short hash of a source profile as written (its column order sets the page layout): a
+    file read through another profile is another entry."""
+    return hashlib.sha256(json.dumps(profile).encode()).hexdigest()[:12]
 
 
 def extractor_key(llm: Any = None) -> str:
