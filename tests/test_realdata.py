@@ -165,6 +165,11 @@ def test_a_page_without_matching_links_shows_what_it_does_link():
     site = "https://hca.example.gov/files"
     assert got == [(f"{site}/apple-health-pdl.xlsx", "Apple Health PDL (Excel)"),
                    (f"{site}/notice.pdf", "Provider notice")]  # fmt: skip
+    # no documents at all (the list sits one page further): the links that match the pattern
+    html = """<a href="#main">Skip</a><a href="/pdl/current">Current statewide PDL</a>
+    <a href="/about">About</a><a href="mailto:pdl@example.gov">Email the PDL team</a>"""
+    got = realdata.files_on_page(html, "https://papdl.example.org/", pattern="(?i)pdl")
+    assert got == [("https://papdl.example.org/pdl/current", "Current statewide PDL")]
 
 
 def test_spreadsheets_are_kept_and_named_by_their_type(tmp_path):

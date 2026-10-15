@@ -113,15 +113,28 @@ def _kind(body: bytes, url: str, content_type: str) -> str | None:
     return None
 
 
-def files_on_page(html: str, base: str, limit: int = 10) -> list[tuple[str, str]]:
+def files_on_page(html: str, base: str, limit: int = 10,
+                  pattern: str | None = None) -> list[tuple[str, str]]:  # fmt: skip
     """(address, link text) of the document links on a page (PDF, Excel, CSV or a content
-    system's download link): what to look at when none matched a source's pattern."""
-    out: dict[str, str] = {}
+    system's download link): what to look at when none matched a source's pattern. A page with
+    no document links at all gives its links that match ``pattern`` instead: the pages one
+    step further that may hold the list."""
+    docs: dict[str, str] = {}
+    pages: dict[str, str] = {}
     for href, text in _LINK.findall(html):
         url = urljoin(base, href.strip())
+        label = " ".join(_TAGS.sub(" ", text).split())
         if re.search(r"\.(pdf|xlsx?|csv)\b|/download\b", urlparse(url).path, re.I):
-            out.setdefault(url, " ".join(_TAGS.sub(" ", text).split()))
-    return list(out.items())[:limit]
+            docs.setdefault(url, label)
+        # a page's path and text, not its site's name ("papdl.com/about" is not a PDL)
+        elif (
+            pattern
+            and url.startswith("http")
+            and url.split("#")[0] != base
+            and re.search(pattern, f"{urlparse(url).path} {label}")
+        ):
+            pages.setdefault(url, label)
+    return list((docs or pages).items())[:limit]
 
 
 def _newness(url: str, label: str) -> tuple[str, int]:
@@ -260,6 +273,12 @@ def fetch(sources: Path, out: Path, states: list[str] | None = None,
     p = Politeness(client, delay)
     results: list[Fetched] = []
     seen: set[str] = set()
+
+    def report(f: Fetched) -> None:  # every outcome goes in the manifest and the log
+        results.append(f)
+        shown = f" ({f.label})" if f.label else ""
+        print(f"[sync] {f.state} {f.status:12} {f.url or f.source}{shown} {f.detail}", flush=True)
+
     try:
         for e in entries:
             state, title = e["state"], e["title"]
@@ -267,8 +286,8 @@ def fetch(sources: Path, out: Path, states: list[str] | None = None,
                 links = [(e["url"], "")]
             else:
                 if not p.allowed(e["page"]):
-                    results.append(Fetched(state, title, e["page"], None, "blocked",
-                                           detail="disallowed by robots.txt"))  # fmt: skip
+                    report(Fetched(state, title, e["page"], None, "blocked",
+                                   detail="disallowed by robots.txt"))  # fmt: skip
                     continue
                 try:
                     r = p.get(e["page"])
@@ -276,13 +295,14 @@ def fetch(sources: Path, out: Path, states: list[str] | None = None,
                     links = discover(r.text, str(r.url), e.get("match", MATCH),
                                      e.get("max", 3), bool(e.get("newest_first")))  # fmt: skip
                 except httpx.HTTPError as err:
-                    results.append(Fetched(state, title, e["page"], None, "error",
-                                           detail=type(err).__name__))  # fmt: skip
+                    report(Fetched(state, title, e["page"], None, "error",
+                                   detail=type(err).__name__))  # fmt: skip
                     continue
                 if not links:
-                    results.append(Fetched(state, title, e["page"], None, "not_found",
-                                           detail="no matching PDF links on the page"))  # fmt: skip
-                    for url, label in files_on_page(r.text, str(r.url)):
+                    report(Fetched(state, title, e["page"], None, "not_found",
+                                   detail="no matching document links on the page"))  # fmt: skip
+                    for url, label in files_on_page(r.text, str(r.url),
+                                                    pattern=e.get("match", MATCH)):  # fmt: skip
                         print(f"[sync] {state} on the page:  {url} ({label})", flush=True)
             for url, label in links:
                 if url in seen:
@@ -291,9 +311,7 @@ def fetch(sources: Path, out: Path, states: list[str] | None = None,
                 f = _download(p, state, title, e.get("url") or e["page"], url, folder,
                               previous.get(url), by_sha, label)  # fmt: skip
                 f.label = label
-                results.append(f)
-                shown = f" ({label})" if label else ""
-                print(f"[sync] {state} {f.status:12} {url}{shown} {f.detail}", flush=True)
+                report(f)
     finally:
         if own:
             client.close()
