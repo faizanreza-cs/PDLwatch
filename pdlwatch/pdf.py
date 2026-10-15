@@ -208,7 +208,12 @@ def modified(path: str | Path) -> str | None:
 
 
 def load(path: str | Path, ocr: bool = True) -> list[Page]:
-    """All pages of a PDF. Pages without a text layer are OCR'd (when ``ocr`` is on)."""
+    """All pages of a PDF. Pages without a text layer are OCR'd (when ``ocr`` is on). A
+    spreadsheet (Excel or CSV) is read as pages of rows (``pdlwatch.sheet``)."""
+    from pdlwatch import sheet
+
+    if sheet.is_sheet(path):
+        return sheet.load(path)
     pages = []
     with pdfplumber.open(str(path)) as pdf:
         for n, pg in enumerate(pdf.pages, 1):

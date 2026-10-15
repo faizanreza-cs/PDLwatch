@@ -29,6 +29,7 @@ from pdlwatch.drugs import PRODUCTS, rxcui
 from pdlwatch.evaluate import evaluate
 from pdlwatch.extract.document import DocResult, date_hint, extract_document
 from pdlwatch.pdf import modified
+from pdlwatch.sheet import is_sheet
 from pdlwatch.synth import corpus as synth_corpus
 from pdlwatch.synth.states import STATES
 from pdlwatch.warehouse import SCHEMA, reset_cache
@@ -235,17 +236,21 @@ def date_hints(results: list[DocResult], hints: dict[str, dict[str, str]]) -> No
 def run_folder(folder: Path, settings: Settings | None = None,
                states: dict[str, str] | None = None, llm: Any = None, workers: int = 4,
                source: str = "pdf folder", cache: bool = True,
-               hints: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:  # fmt: skip
-    """Any folder of PDFs (real state PDLs). ``states`` maps file stem -> state code;
-    ``hints`` maps file stem -> {title, name, first_seen} from the fetch ledger.
+               hints: dict[str, dict[str, str]] | None = None,
+               skip: set[str] | None = None) -> dict[str, Any]:  # fmt: skip
+    """Any folder of PDFs and spreadsheets (real state PDLs). ``states`` maps file stem ->
+    state code; ``hints`` maps file stem -> {title, name, first_seen} from the fetch ledger;
+    files whose stem is in ``skip`` are left out.
 
     PDFs extracted by an earlier run (same bytes, same extractor) come from the cache next to
     the warehouse, so a weekly run only pays for what changed.
     """
     s = settings or get_settings()
-    files = sorted(Path(folder).glob("**/*.pdf"))
+    files = sorted(f for f in Path(folder).glob("**/*")
+                   if f.suffix.lower() == ".pdf" or is_sheet(f))  # fmt: skip
+    files = [f for f in files if f.stem not in (skip or set())]
     if not files:
-        raise FileNotFoundError(f"no PDFs in {folder}")
+        raise FileNotFoundError(f"no PDFs or spreadsheets in {folder}")
     jobs: list[Job] = [(str(f), f.stem, (states or {}).get(f.stem)) for f in files]
     store = DocCache(cache_path(s.db_path) / "docs", extractor_key(llm)) if cache else None
     t0 = time.perf_counter()

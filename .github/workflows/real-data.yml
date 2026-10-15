@@ -1,6 +1,6 @@
 name: Real data (state Medicaid PDLs)
 
-# Manual: downloads the public PDFs in sources/medicaid_pdls.yaml, extracts them with the same
+# Manual: downloads the public PDLs in sources/medicaid_pdls.yaml, extracts them with the same
 # pipeline as the synthetic corpus, prints the results and an audit sample, and keeps them as an
 # artifact. Nothing downloaded is committed.
 on:
@@ -97,7 +97,8 @@ jobs:
           for spec in $INSPECT; do
             part="${spec%%:*}"; pages="${spec#*:}"
             case "$pages" in ''|*[!0-9,]*) echo "skipping $spec: pages must be numbers"; continue ;; esac
-            for f in data/real/pdfs/*.pdf; do
+            for f in data/real/pdfs/*.pdf data/real/pdfs/*.xlsx data/real/pdfs/*.csv; do
+              [ -e "$f" ] || continue
               case "$(basename "$f")" in
                 *"$part"*) .venv/bin/python -m pdlwatch.cli inspect "$f" --pages "$pages" --width 120 ;;
               esac

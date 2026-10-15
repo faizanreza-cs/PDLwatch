@@ -15,6 +15,7 @@ from pdlwatch.extract import legend as legend_mod
 from pdlwatch.extract.rows import Row, dedupe, from_raw, score
 from pdlwatch.pdf import Page, load
 from pdlwatch.review import row_key
+from pdlwatch.sheet import is_sheet
 from pdlwatch.synth.states import BY_NAME as STATE_CODES
 
 _MONTHS = (
@@ -175,36 +176,55 @@ def _default_status(head: str, raw: list[layout.RawRow]) -> str | None:
 
 def extract_document(path: str | Path, doc_id: str | None = None, state: str | None = None,
                      llm: Any = None) -> DocResult:  # fmt: skip
-    """Extract every formulary row from one PDF. ``llm``: an ``LLMExtractor`` for prose pages."""
+    """Extract every formulary row from one PDF or spreadsheet. ``llm``: an ``LLMExtractor`` for
+    prose pages."""
     t0 = time.perf_counter()
     path = Path(path)
     doc_id = doc_id or path.stem
     pages = load(path)
+    spreadsheet = is_sheet(path)
     head = " ".join(ln.text for ln in pages[0].lines[:6]) if pages else ""
     state = state or _state(head)
     leg = legend_mod.parse(legend_text(pages))
     raw, table_pages = layout.parse(pages)
     default = _default_status(head, raw)
     rows = [from_raw(r, leg, doc_id, state, default) for r in raw]
-    prose_pages = [p for p in pages if p.number not in table_pages]
+    # a workbook's content is its tables: a notes sheet is not prose to read drugs from
+    prose_pages = [] if spreadsheet else [p for p in pages if p.number not in table_pages]
     calls = 0
     if llm is not None and prose_pages:
         llm_rows, calls = llm.extract(prose_pages, doc_id, state)
         rows += llm_rows
-    else:
+    elif not spreadsheet:
         rows += [prose.to_row(p, doc_id, state) for p in prose.extract(pages, table_pages)]
     rows = [r for r in rows if r.product or _worth_review(r.drug_text)]
     rows = dedupe(score(rows))
     texts = {p.number: p.text for p in pages}
     for r in rows:
-        r.row_key = row_key(texts.get(r.page, ""), r.y, r.drug_text)
+        # a spreadsheet row is its own record: it keeps its decisions while other rows change
+        r.row_key = (row_key(r.evidence, 0, r.drug_text) if spreadsheet
+                     else row_key(texts.get(r.page, ""), r.y, r.drug_text))  # fmt: skip
     title = pages[0].lines[0].text if pages and pages[0].lines else path.stem
     doc_type = _doc_type(title, head, bool(table_pages))
-    effective, effective_from = _effective(pages)
+    # a workbook states its date above the table, if anywhere: a date column inside the table
+    # ("Effective date" of each listing) is not the list's
+    effective, effective_from = _effective(_title_rows(pages) if spreadsheet else pages)
     return DocResult(doc_id, str(path), state, effective, title, doc_type, len(pages),
                      sum(p.ocr for p in pages), rows, leg.codes, time.perf_counter() - t0, calls,
                      complete=not any(p.ocr_failed for p in pages),
                      effective_from=effective_from)  # fmt: skip
+
+
+def _title_rows(pages: list[Page]) -> list[Page]:
+    """The first page's lines above its first table header (a workbook's title and notes)."""
+    if not pages:
+        return []
+    above = []
+    for line in pages[0].lines:
+        if layout.header(line, pages[0].width):
+            break
+        above.append(line)
+    return [Page(1, pages[0].width, pages[0].height, above, False)]
 
 
 def _doc_type(title: str, head: str, has_tables: bool) -> str:

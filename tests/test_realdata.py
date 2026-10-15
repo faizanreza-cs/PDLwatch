@@ -165,3 +165,73 @@ def test_a_page_without_matching_links_shows_what_it_does_link():
     site = "https://hca.example.gov/files"
     assert got == [(f"{site}/apple-health-pdl.xlsx", "Apple Health PDL (Excel)"),
                    (f"{site}/notice.pdf", "Provider notice")]  # fmt: skip
+
+
+def test_spreadsheets_are_kept_and_named_by_their_type(tmp_path):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    xlsx = BytesIO()
+    Workbook().save(xlsx)
+    week = """<a href="/files/apple-health-pdl-20261001.xlsx">Apple Health PDL 10/1/2026</a>
+    <a href="/files/apple-health-pdl-20261008.xlsx">Apple Health PDL 10/8/2026</a>
+    <a href="/files/moved-pdl.xlsx">Old PDL</a><a href="/files/pdl.csv">PDL (CSV)</a>"""
+
+    def handler(request):
+        path = request.url.path
+        if path == "/robots.txt":
+            return httpx.Response(404)
+        if path == "/pdl":
+            return httpx.Response(200, text=week, headers={"content-type": "text/html"})
+        if path == "/files/moved-pdl.xlsx":  # an error page served in place of the file
+            return httpx.Response(200, text="<html>moved</html>",
+                                  headers={"content-type": "text/html"})  # fmt: skip
+        if path.endswith(".csv"):
+            return httpx.Response(200, text="Drug Name,Status\nOzempic,Preferred\n",
+                                  headers={"content-type": "text/csv"})  # fmt: skip
+        return httpx.Response(
+            200,
+            content=xlsx.getvalue() + path.encode(),
+            headers={
+                "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            },
+        )
+
+    src = _sources(tmp_path, [{"state": "WA", "title": "weekly", "page": "https://hca.example.gov/pdl",
+                               "match": "(?i)pdl", "max": 4, "newest_first": True}])  # fmt: skip
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    got = realdata.fetch(src, tmp_path / "out", client=client, delay=0)
+    status = {f.url.rsplit("/", 1)[1]: f.status for f in got}
+    assert status == {"apple-health-pdl-20261008.xlsx": "ok",
+                      "apple-health-pdl-20261001.xlsx": "ok",
+                      "moved-pdl.xlsx": "not_pdf", "pdl.csv": "ok"}  # fmt: skip
+    assert got[0].url.endswith("20261008.xlsx")  # the newest week first
+    files = sorted(p.name for p in (tmp_path / "out" / "pdfs").iterdir())
+    assert [re.sub(r"-[0-9a-f]{8}(\.\w+)$", r"\1", f) for f in files] == [
+        "WA-apple-health-pdl-20261001.xlsx",
+        "WA-apple-health-pdl-20261008.xlsx",
+        "WA-pdl.csv",
+    ]
+
+
+def test_files_no_listed_source_selects_leave_the_tables():
+    page = "https://bms.example.gov/pdl"
+    old = "https://hca.example.gov/old-pdl.pdf"
+
+    def entry(state, source, url, file, label=""):
+        return {"state": state, "source": source, "url": url, "file": file, "label": label}
+
+    ledger = [
+        entry("WA", old, old, "WA-old-pdl-1"),  # its entry was removed from the sources file
+        entry("WV", page, f"{page}/media/1/download", "WV-pdl-2025-2", "Preferred Drug List 2025"),
+        entry("WV", page, f"{page}/media/2/download", "WV-faq-3", "PDL Frequently Asked Questions"),
+        entry("WV", page, f"{page}/media/3/download", "WV-pdl-4", "Preferred Drug Lists"),
+        entry("OH", "https://x.example.gov/pdl.pdf", "https://x.example.gov/pdl.pdf", None),
+    ]
+    entries = [{"state": "WV", "title": "WV page", "page": page, "max": 1,
+                "match": "(?i)^(?!.*frequently asked).*(preferred drug list|pdl)"}]  # fmt: skip
+    # the older version the page still matches stays: it is the list's history
+    assert realdata.retired(entries, ledger) == {"WA-old-pdl-1", "WV-faq-3"}
+    entries.append({"state": "WA", "title": "WA", "url": old})
+    assert realdata.retired(entries, ledger) == {"WV-faq-3"}

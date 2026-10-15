@@ -130,6 +130,8 @@ def test_a_second_run_extracts_only_what_changed(built, tmp_path):
         (built["root"] / "corpus" / new["file"]).read_bytes()
     )
     assert run_folder(folder, s, workers=1)["cache"] == {"from_cache": 2, "extracted": 1}
+    left_out = run_folder(folder, s, workers=1, skip={Path(new["file"]).stem})
+    assert left_out["cache"] == {"from_cache": 2, "extracted": 0}
 
 
 def test_undated_documents_take_a_date_from_their_source():

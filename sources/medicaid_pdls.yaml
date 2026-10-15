@@ -1,8 +1,8 @@
 # Public Medicaid preferred drug lists (PDLs) and formularies, by state.
 #
 # Each entry is either
-#   url:   a direct link to one PDF, or
-#   page:  a public web page; its PDF links whose address or link text match `match` are
+#   url:   a direct link to one PDF (or Excel/CSV file), or
+#   page:  a public web page; its file links whose address or link text match `match` are
 #          downloaded (up to `max`, in page order, or the newest-looking first with
 #          `newest_first: true`). State sites rename files every quarter, so a page is often
 #          the more stable address.
@@ -158,20 +158,15 @@
   url: https://dvha.vermont.gov/sites/dvha/files/documents/VERMONT%20PDL%204_30_24_V3_%20FINAL.pdf
 
 - state: WA
-  title: Washington Apple Health PDL page (weekly versions)
+  title: Washington Apple Health PDL, weekly versions (Excel)
   page: https://www.hca.wa.gov/billers-providers-partners/program-information-providers/apple-health-preferred-drug-list-pdl
-  match: "(?i)preferred-drug-list|pdl"
+  match: "(?i)apple-health-pdl-20[0-9]{6}"  # one dated workbook per week; the PDF is from 2020
+  newest_first: true
   max: 2
-- state: WA
-  title: Washington Apple Health PDL, June 2020 (an old copy still at this address)
-  url: https://www.hca.wa.gov/assets/billers-and-providers/apple-health-preferred-drug-list.pdf
 
 - state: WV
   title: West Virginia Medicaid PDL page
   page: https://bms.wv.gov/preferred-drug-list-and-coverage-details
-  match: "(?i)preferred drug list|pdl"
+  match: "(?i)^(?!.*frequently asked).*(preferred drug list|pdl)"  # the list, not its FAQ
   newest_first: true  # the page lists older versions first
-  max: 2
-- state: WV
-  title: West Virginia Medicaid PDL, 2024 Q1
-  url: https://dhhr.wv.gov/bms/BMS%20Pharmacy/Documents/Preferred%20Drug%20List/2023/WV%20PDL%202024.Q1.pdf
+  max: 1

@@ -169,7 +169,7 @@ Azure OpenAI.
 | Part | What it does | Tech |
 |---|---|---|
 | Synthetic corpus (`synth/`) | 106 PDLs and PA criteria PDFs for 51 jurisdictions, with the truth for every row and change; scans with tilt, noise and blur | reportlab, Pillow |
-| PDF reader (`pdf.py`) | Words, lines and phrases from the text layer, or from OCR after deskewing | pdfplumber, Tesseract |
+| PDF and spreadsheet reader (`pdf.py`, `sheet.py`) | Words, lines and phrases from the text layer, or from OCR after deskewing; a list published as Excel or CSV becomes rows at fixed column positions, read by the same table parser | pdfplumber, Tesseract, openpyxl |
 | Extraction (`extract/`) | Header-anchored tables and lists, legends, prose rules, LLM extraction with grounding, confidence and review reasons | Python, rapidfuzz, LLM APIs |
 | Drug dictionary (`drugs.py`, `rxnorm.py`) | 193 products in 20 therapeutic classes, aliases, OCR-tolerant matching; names outside it are matched to RxNorm's ingredient and brand names | rapidfuzz, RxNorm |
 | Evaluation (`evaluate.py`, `changes.py`) | Row recall and precision, field accuracy, accepted error rate by layout and for scans; change detection against the truth | pandas |
@@ -201,7 +201,7 @@ pdlwatch changes --state TX                    # what changed between versions
 pdlwatch alerts --watchlist watchlists/example.yaml   # the changes a team watches, rated
 pdlwatch review --out review.csv               # the review queue, with sources
 pdlwatch review --apply review.csv --reviewer Faizan   # decisions that hold on every run after
-pdlwatch extract path/to/pdl.pdf --out rows.csv   # any PDL or PA criteria PDF
+pdlwatch extract path/to/pdl.pdf --out rows.csv   # a PDL or PA criteria PDF, or an Excel/CSV list
 PDLWATCH_DB=data/mine.duckdb pdlwatch extract path/to/folder/   # a folder into its own warehouse
 make api                                        # http://localhost:8000/docs
 ```
@@ -319,9 +319,9 @@ in CI.
 
 ## Tests and evals
 
-**176 offline tests** cover table and list parsing on hand-built pages (including layouts
-copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns),
-legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they
+**182 offline tests** cover table and list parsing on hand-built pages (including layouts
+copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns,
+two tables side by side), lists published as workbooks, legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they
 measure, effective dates from titles and file names, change detection, point-in-time history and
 alerts, the RxNorm lexicon on a sample release, the
 extraction cache and the downloader against a fake server, the pipeline end to end on a small
