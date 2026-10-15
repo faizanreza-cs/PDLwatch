@@ -50,6 +50,11 @@ def main(argv: list[str] | None = None) -> int:
     b = sub.add_parser("build", help="extract the synthetic corpus, score it, write the warehouse")
     b.add_argument("--llm", action="store_true", help="read prose with the LLM (needs a key)")
     b.add_argument("--workers", type=int, default=4)
+    bm = sub.add_parser("benchmark", help="extraction speed on this machine (the synthetic "
+                        "corpus, or --folder of PDFs)")  # fmt: skip
+    bm.add_argument("--folder", type=Path, help="PDFs to read instead of the synthetic corpus")
+    bm.add_argument("--workers", default="1,4", help="worker counts to time, e.g. 1,4")
+    bm.add_argument("--out", type=Path, help="also write the numbers as JSON")
     e = sub.add_parser("extract", help="extract one PDF (rows to CSV) or a folder (warehouse)")
     e.add_argument("path", type=Path)
     e.add_argument("--state", help="two-letter code, when the PDF doesn't name its state")
@@ -120,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         print(_summary(res))
         print(f"wrote {get_settings().db_path} and results.json")
         return 0
+    if args.cmd == "benchmark":
+        return _benchmark(args.folder, args.workers, args.out)
     if args.cmd == "extract":
         return _extract(args)
     if args.cmd == "sync":
@@ -268,6 +275,24 @@ def _extract(args: argparse.Namespace) -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame([r.to_dict() for r in doc.rows]).to_csv(args.out, index=False)
         print(f"wrote {len(doc.rows)} rows to {args.out}")
+    return 0
+
+
+def _benchmark(folder: Path | None, workers: str, out: Path | None) -> int:
+    from pdlwatch import benchmark
+    from pdlwatch.config import corpus_path
+    from pdlwatch.synth.corpus import build as build_corpus
+
+    if folder is None:
+        corpus = corpus_path(get_settings().db_path)
+        if not (corpus / "truth.json").exists():
+            build_corpus(corpus)
+        folder = corpus / "pdfs"
+    counts = tuple(int(w) for w in workers.split(",") if w.strip().isdigit() and int(w) > 0)
+    res = benchmark.run(benchmark.jobs_for(folder), counts or (1,))
+    print(benchmark.report(res))
+    if out:
+        out.write_text(json.dumps(res, indent=1))
     return 0
 
 

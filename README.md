@@ -174,10 +174,11 @@ Azure OpenAI.
 | Drug dictionary (`drugs.py`, `rxnorm.py`) | 193 products in 20 therapeutic classes, aliases, OCR-tolerant matching; names outside it are matched to RxNorm's ingredient and brand names | rapidfuzz, RxNorm |
 | Evaluation (`evaluate.py`, `changes.py`) | Row recall and precision, field accuracy, accepted error rate by layout and for scans; change detection against the truth | pandas |
 | History (`history.py`) | Each drug's status in force on any date, one interval per PDL version, with its source | pandas |
+| Review (`review.py`) | Reviewer decisions (accept, correct, reject) from a CSV, kept in an append-only log, applied on every run; the error rate behind each review reason | pandas |
 | Alerts (`alerts.py`, `watchlists/`) | The changes a team watches (brands, ingredients, classes, states), rated high, medium or info, in a digest that keeps unconfirmed changes apart; sent once to a Slack or Teams webhook | Python |
 | Warehouse and saved queries (`warehouse.py`, `sql/`) | Seven tables; state scorecard, class landscape, brand over generic, quarterly changes, review backlog, extraction by document | Snowflake SQL, run locally on DuckDB via sqlglot |
 | Access Copilot (`agent/`) | Tool-using agent that cites document and page | Anthropic, OpenAI, Azure OpenAI, or offline mock |
-| API (`api.py`) | `/drugs`, `/states`, `/classes`, `/changes`, `/review`, `/documents`, `/metrics`, `/queries`, `POST /extract` for one uploaded PDF, `POST /ask` | FastAPI |
+| API (`api.py`) | `/drugs`, `/states`, `/classes`, `/changes`, `/review`, `/documents`, `/metrics`, `/queries`, `POST /extract` for one uploaded PDF, `POST /ask`; a key per customer and an access log | FastAPI |
 | Real PDLs (`realdata.py`, `cache.py`, `audit.py`, `sources/`) | Polite downloader that keeps every version by content and fetches only what changed, an extraction cache so a run only extracts new PDFs, an audit printout to check rows against their source line, and `pdlwatch inspect` to see how a page is read | httpx |
 
 <p align="center">
@@ -269,12 +270,36 @@ Extracting the 2,584 pages took 2 minutes 18 seconds on 4 workers (run
 [38640072478](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38640072478)); the run
 above found no new file and rebuilt every table from the extraction cache in 7 seconds.
 
+## Run it as a service
+
+- **Cadence:** `pdlwatch sync` checks every source on a schedule, downloads only files that
+  changed and extracts only new PDFs. When no state has posted anything new, it rebuilds every
+  table from the cache in seconds (7 seconds in the [real run](#results)).
+- **Speed:** real PDLs carry a text layer and ran at about 1,100 pages a minute on a 4-vCPU
+  runner (2,584 pages in 2 minutes 18 seconds). `pdlwatch benchmark` measures any machine. On a
+  4-CPU machine, the synthetic corpus (317 pages, 47 of them scans that need OCR) took
+  151 seconds with 1 worker and 49 seconds with 4 (386 pages a minute); a fully cached run took
+  0.15 seconds.
+- **Quality:** rows the pipeline isn't sure of wait in the [review queue](#the-review-queue)
+  with a reason. A reviewer's decision is recorded once and holds on every later run, and the
+  decisions measure the error rate behind each review reason and, from audits, of automatic
+  acceptance.
+- **Delivery:**
+  - alerts on a customer's brands, ingredients, classes and states (`pdlwatch alerts`), posted
+    once to a Slack or Teams webhook;
+  - the REST API, with a key per customer (`PDLWATCH_API_KEYS`) and an access log that names
+    the customer on every request;
+  - a Snowflake share per customer ([`snowflake/share.sql`](snowflake/share.sql)): secure views
+    over the access table, changes, history and documents, which can be limited to the classes
+    a customer bought.
+
 ## Integrations
 
 The same SQL runs on Snowflake ([`snowflake/setup.sql`](snowflake/setup.sql) creates a read-only
-role for the agent and API), and the repo carries starter kits for
-[Power BI](powerbi/README.md), [Dataiku](dataiku/README.md) and
-[Copilot Studio](docs/copilot-studio.md). The kits aren't run in CI.
+role for the agent and API; [`snowflake/share.sql`](snowflake/share.sql) shares the results with
+a customer's account), and the repo carries starter kits for [Power BI](powerbi/README.md),
+[Dataiku](dataiku/README.md) and [Copilot Studio](docs/copilot-studio.md). The kits aren't run
+in CI.
 
 ## Guardrails
 
@@ -288,12 +313,13 @@ role for the agent and API), and the repo carries starter kits for
   functions are blocked, rows are capped and a query stops after 30 seconds. DuckDB opens
   read-only with external access disabled; on Snowflake the agent uses the read-only role.
 - **The API is read-only** apart from `POST /extract`, which reads one PDF (up to 20 MB and 60
-  pages) and stores nothing. It can require a key (`PDLWATCH_API_TOKEN`, `X-API-Key` header);
-  the LLM provider is set by the server, never by the caller.
+  pages) and stores nothing. It can require a key per customer (`PDLWATCH_API_KEYS`, or one
+  `PDLWATCH_API_TOKEN`; `X-API-Key` header), checked in constant time, and its log names the
+  customer, never the key. The LLM provider is set by the server, never by the caller.
 
 ## Tests and evals
 
-**170 offline tests** cover table and list parsing on hand-built pages (including layouts
+**173 offline tests** cover table and list parsing on hand-built pages (including layouts
 copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns),
 legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they
 measure, effective dates from titles and file names, change detection, point-in-time history and

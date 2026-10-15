@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -70,3 +71,17 @@ def test_api_key_is_enforced_when_set(monkeypatch, built):
     assert client.get("/metrics", headers={"X-API-Key": "s3cret"}).status_code == 200
     odd = {"X-API-Key": "café".encode("latin-1")}  # non-ASCII: a clean 401, not a 500
     assert client.get("/metrics", headers=odd).status_code == 401
+
+
+def test_each_customer_has_a_key_and_the_log_names_them(monkeypatch, built, caplog):
+    monkeypatch.setenv("PDLWATCH_API_KEYS", "acme:key-acme, beta:key-beta")
+    monkeypatch.setenv("PDLWATCH_API_TOKEN", "s3cret")  # still works, as "default"
+    with caplog.at_level("INFO", logger="pdlwatch.access"):
+        assert client.get("/metrics", headers={"X-API-Key": "key-beta"}).status_code == 200
+        assert client.get("/metrics", headers={"X-API-Key": "s3cret"}).status_code == 200
+        assert client.get("/metrics", headers={"X-API-Key": "key-gamma"}).status_code == 401
+    logged = [json.loads(r.getMessage()) for r in caplog.records]
+    assert [(e["customer"], e["status"]) for e in logged] == [
+        ("beta", 200), ("default", 200), (None, 401)]  # fmt: skip
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert not any(k in text for k in ("key-acme", "key-beta", "key-gamma", "s3cret"))

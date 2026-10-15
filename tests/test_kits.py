@@ -74,3 +74,23 @@ def test_snowflake_setup_has_a_read_only_role():
 def test_charts_render(built, tmp_path):
     paths = charts.render(tmp_path)
     assert len(paths) == 3 and all(p.stat().st_size > 10_000 for p in paths)
+
+
+def test_snowflake_share_reads_real_columns_through_secure_views():
+    import sqlglot
+    from sqlglot import exp
+
+    sql = (ROOT / "snowflake" / "share.sql").read_text()
+    statements = [s for s in sqlglot.parse(sql, read="snowflake") if s is not None]
+    views = [s for s in statements if isinstance(s, exp.Create) and s.kind == "VIEW"]
+    assert len(views) == 4 and all("SECURE" in s.sql(dialect="snowflake") for s in views)
+    for view in views:  # every column a view selects exists in the table it reads
+        select = view.expression
+        source = select.find(exp.From).this
+        table = source.name.lower()
+        if table not in SCHEMA:
+            continue
+        cols = {c.name.lower() for c in select.expressions}
+        assert cols <= set(SCHEMA[table]), (table, cols - set(SCHEMA[table]))
+    granted = re.findall(r"GRANT SELECT ON VIEW (\S+) TO SHARE", sql)
+    assert sorted(granted) == sorted(v.this.sql(dialect="snowflake") for v in views)

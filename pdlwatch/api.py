@@ -1,21 +1,27 @@
 """REST API: drug access by state, state PDLs, class landscapes, changes, the review queue,
 extraction from an uploaded PDF, and the Access Copilot.
 
-Run: ``uvicorn pdlwatch.api:app``. When ``PDLWATCH_API_TOKEN`` is set, every request must
-send it in the ``X-API-Key`` header (set it before exposing the API, e.g. to a Copilot Studio
-connector).
+Run: ``uvicorn pdlwatch.api:app``. Keys: ``PDLWATCH_API_KEYS="acme:KEY1,beta:KEY2"`` gives each
+customer its own key (``PDLWATCH_API_TOKEN`` alone still works, as one key named "default").
+When any is set, every request must send one in the ``X-API-Key`` header, and the access log
+(logger ``pdlwatch.access``, one JSON line per request) names the customer whose key it was,
+never the key, so usage can be counted and billed per customer. Set keys before exposing the
+API, e.g. to a Copilot Studio connector.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import tempfile
+import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from pdlwatch import __version__
@@ -27,10 +33,35 @@ MAX_UPLOAD_MB = 20
 MAX_UPLOAD_PAGES = 60  # OCR costs seconds per page
 
 
-def check_token(x_api_key: str = Header(default="")) -> None:
+access_log = logging.getLogger("pdlwatch.access")
+
+
+def api_keys() -> dict[str, str]:
+    """Customer name -> key, from PDLWATCH_API_KEYS ("acme:KEY1,beta:KEY2") and the single
+    PDLWATCH_API_TOKEN (named "default")."""
+    keys: dict[str, str] = {}
+    for part in os.environ.get("PDLWATCH_API_KEYS", "").split(","):
+        name, sep, key = part.partition(":")
+        if sep and name.strip() and key.strip():
+            keys[name.strip()] = key.strip()
     token = os.environ.get("PDLWATCH_API_TOKEN")
-    if token and not secrets.compare_digest(x_api_key.encode(), token.encode()):
+    if token:
+        keys.setdefault("default", token)
+    return keys
+
+
+def check_token(request: Request, x_api_key: str = Header(default="")) -> None:
+    """The customer a request comes from, by its key; every key is compared in full, so the
+    response time says nothing about which one nearly matched. No keys set: open (local use)."""
+    keys = api_keys()
+    if not keys:
+        request.state.customer = "open"
+        return
+    given = x_api_key.encode()
+    found = [name for name, key in keys.items() if secrets.compare_digest(given, key.encode())]
+    if not found:
         raise HTTPException(401, "missing or wrong X-API-Key")
+    request.state.customer = found[0]
 
 
 app = FastAPI(
@@ -40,6 +71,19 @@ app = FastAPI(
     "landscapes, quarterly changes, a review queue and an access analytics agent.",
     dependencies=[Depends(check_token)],
 )
+
+
+@app.middleware("http")
+async def log_access(request: Request,
+                     call_next: Callable[[Request], Awaitable[Response]]) -> Response:  # fmt: skip
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    access_log.info(json.dumps({
+        "customer": getattr(request.state, "customer", None), "method": request.method,
+        "path": request.url.path, "status": response.status_code,
+        "ms": round((time.perf_counter() - t0) * 1000),
+    }))  # fmt: skip
+    return response
 
 
 class AskRequest(BaseModel):
