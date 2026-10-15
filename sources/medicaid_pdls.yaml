@@ -3,7 +3,8 @@
 # Each entry is either
 #   url:   a direct link to one PDF, or
 #   page:  a public web page; its PDF links whose address or link text match `match` are
-#          downloaded (up to `max`). State sites rename files every quarter, so a page is often
+#          downloaded (up to `max`, in page order, or the newest-looking first with
+#          `newest_first: true`). State sites rename files every quarter, so a page is often
 #          the more stable address.
 #
 # `fetch` sends one request per second, identifies itself, honours robots.txt, and skips (and
@@ -166,9 +167,10 @@
   url: https://www.hca.wa.gov/assets/billers-and-providers/apple-health-preferred-drug-list.pdf
 
 - state: WV
-  title: West Virginia Medicaid PDL page (current quarter)
+  title: West Virginia Medicaid PDL page
   page: https://bms.wv.gov/preferred-drug-list-and-coverage-details
   match: "(?i)preferred drug list|pdl"
+  newest_first: true  # the page lists older versions first
   max: 2
 - state: WV
   title: West Virginia Medicaid PDL, 2024 Q1

@@ -69,7 +69,7 @@ def test_fetch_outcomes_and_manifest(tmp_path):
     assert [re.sub(r"-[0-9a-f]{8}\.pdf$", "", f) for f in files] == [
         "OH-ohio-pdl",
         "TX-PDL-July-2026",
-        "TX-landing-page",  # named after its source when the address names nothing
+        "TX-Preferred-Drug-List-Q2-2026",  # named after its link when the address names nothing
         "TX-pdl-april-2026",
     ]  # stored by content
     manifest = json.loads((tmp_path / "out" / "manifest.json").read_text())
@@ -140,3 +140,28 @@ def test_unchanged_files_are_not_downloaded_and_new_versions_kept(tmp_path):
     assert sorted(p.name for p in (out / "pdfs").iterdir()) == sorted([first.file, newer.file])
     ledger = realdata.read_ledger(out)
     assert [e["status"] for e in ledger] == ["ok", "not_modified", "ok"]
+
+
+def test_pages_that_list_old_versions_first_can_be_read_newest_first():
+    html = """
+    <a href="/media/26936/download">Preferred Drug List, effective April 1, 2025</a>
+    <a href="/media/27001/download">PDL change notice</a>
+    <a href="/media/41358/download">Preferred Drug List, effective April 1, 2026</a>
+    <a href="/media/40870/download">PDL archive</a>
+    """
+    base = "https://bms.example.gov/pdl"
+    first = realdata.discover(html, base, "(?i)pdl|preferred", 2)
+    assert [u.rsplit("/", 2)[1] for u, _ in first] == ["26936", "27001"]  # page order
+    newest = realdata.discover(html, base, "(?i)pdl|preferred", 2, newest_first=True)
+    assert newest[0] == ("https://bms.example.gov/media/41358/download",
+                         "Preferred Drug List, effective April 1, 2026")  # fmt: skip
+    assert newest[1][0].endswith("/26936/download")  # dated beats undated, then the number
+
+
+def test_a_page_without_matching_links_shows_what_it_does_link():
+    html = """<a href="/files/apple-health-pdl.xlsx">Apple Health PDL (Excel)</a>
+    <a href="/about">About</a><a href="/files/notice.pdf">Provider notice</a>"""
+    got = realdata.files_on_page(html, "https://hca.example.gov/pdl")
+    site = "https://hca.example.gov/files"
+    assert got == [(f"{site}/apple-health-pdl.xlsx", "Apple Health PDL (Excel)"),
+                   (f"{site}/notice.pdf", "Provider notice")]  # fmt: skip

@@ -400,3 +400,28 @@ def test_a_number_alone_in_a_table_is_a_cell_not_a_page_number():
     ], False)  # fmt: skip
     rows, _ = layout.parse([page])
     assert [(r.cells["drug"], r.cells.get("tier")) for r in rows] == [("Ozempic", "2")]
+
+
+def test_two_tables_side_by_side_with_tiers_beside_wrapped_names():
+    """Georgia's managed care formulary: two tables per page, each tier centred on its name."""
+    head = [("Drug Name", 34), ("Tier", 176), ("Restrictions", 221),
+            ("Drug Name", 314), ("Tier", 456), ("Restrictions", 501)]  # fmt: skip
+    page = _page(
+        _line(34, *head),
+        Line(_line(67, ("ibuprofen oral tablet", 34)).phrases  # a class bar on the right
+             + _line(67, ("ANTIASTHMATICS", 314), bold=True).phrases),
+        _line(82, ("400 mg, 600 mg, 800", 34), ("1", 184), ("albuterol sulfate", 314)),
+        _line(94, ("mg", 34), ("QL (4 EA per", 500)),
+        _line(101, ("inhalation hfa aerosol", 314), ("1", 464)),
+        _line(108, ("90 days)", 500)),
+        _line(116, ("leflunomide", 34), ("1", 184)),
+        _line(130, ("Otezla oral tablet", 314), ("2", 464), ("PA", 501)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    got = [(r.cells["drug"], r.cells.get("tier"), r.cells.get("req")) for r in rows]
+    assert got == [
+        ("ibuprofen oral tablet 400 mg, 600 mg, 800 mg", "1", None),
+        ("leflunomide", "1", None),
+        ("albuterol sulfate inhalation hfa aerosol", "1", "QL (4 EA per 90 days)"),
+        ("Otezla oral tablet", "2", "PA"),
+    ]

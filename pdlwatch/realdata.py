@@ -51,6 +51,7 @@ class Fetched:
     last_modified: str | None = None
     fetched_at: str = ""
     new: bool = False  # content this archive hadn't seen: a new document or a new version
+    label: str = ""  # the link's text on the source page ("Preferred Drug List, Q2 2026")
 
 
 class Politeness:
@@ -96,19 +97,41 @@ def _document_link(url: str) -> bool:
     return ".pdf" in url.lower() or path.endswith("/download")
 
 
-def discover(html: str, base: str, pattern: str, limit: int) -> list[str]:
-    """PDF links on a page whose address or link text match ``pattern``, in page order."""
-    out: list[str] = []
+def files_on_page(html: str, base: str, limit: int = 10) -> list[tuple[str, str]]:
+    """(address, link text) of the document links on a page (PDF, Excel, CSV or a content
+    system's download link): what to look at when none matched a source's pattern."""
+    out: dict[str, str] = {}
+    for href, text in _LINK.findall(html):
+        url = urljoin(base, href.strip())
+        if re.search(r"\.(pdf|xlsx?|csv)\b|/download\b", urlparse(url).path, re.I):
+            out.setdefault(url, " ".join(_TAGS.sub(" ", text).split()))
+    return list(out.items())[:limit]
+
+
+def _newness(url: str, label: str) -> tuple[str, int]:
+    """How recent a link looks: a date in its text or address, then the largest number in its
+    address (content systems number uploads in order: "/media/41358/download")."""
+    from pdlwatch.extract.document import date_hint
+
+    numbers = [int(n) for n in re.findall(r"\d+", urlparse(url).path)]
+    return date_hint(label) or date_hint(unquote(url)) or "", max(numbers, default=0)
+
+
+def discover(html: str, base: str, pattern: str, limit: int,
+             newest_first: bool = False) -> list[tuple[str, str]]:  # fmt: skip
+    """(address, link text) of the PDF links on a page whose address or text match
+    ``pattern``: the first ``limit`` in page order, or the newest-looking with
+    ``newest_first`` (for pages that list old versions first)."""
+    out: dict[str, str] = {}
     for href, text in _LINK.findall(html):
         url = urljoin(base, href.strip())
         label = " ".join(_TAGS.sub(" ", text).split())
-        if not _document_link(url) or not re.search(pattern, url + " " + label):
-            continue
-        if url not in out:
-            out.append(url)
-        if len(out) >= limit:
-            break
-    return out
+        if _document_link(url) and re.search(pattern, url + " " + label) and url not in out:
+            out[url] = label
+    links = list(out.items())
+    if newest_first:
+        links.sort(key=lambda link: _newness(*link), reverse=True)
+    return links[:limit]
 
 
 def _slug(text: str) -> str:
@@ -127,7 +150,8 @@ def read_ledger(out: Path) -> list[dict[str, Any]]:
 
 
 def _download(p: Politeness, state: str, title: str, source: str, url: str, folder: Path,
-              previous: dict[str, Any] | None, by_sha: dict[str, str]) -> Fetched:  # fmt: skip
+              previous: dict[str, Any] | None, by_sha: dict[str, str],
+              label: str = "") -> Fetched:  # fmt: skip
     now = datetime.now(UTC).isoformat(timespec="seconds")
     f = Fetched(state, title, source, url, "error", fetched_at=now)
     if not p.allowed(url):
@@ -165,7 +189,7 @@ def _download(p: Politeness, state: str, title: str, source: str, url: str, fold
     if name is None:
         stem = Path(unquote(urlparse(url).path)).stem
         if stem.lower() in {"download", "file", "view", "index"} or stem.isdigit():
-            stem = title  # "/media/41358/download" says nothing: the source's title does
+            stem = label or title  # "/media/41358/download" says nothing: its link text does
         name = f"{state}-{_slug(stem)}-{sha[:8]}.pdf"
         (folder / name).write_bytes(body)
         by_sha[f"{state}:{sha}"] = name
@@ -200,7 +224,7 @@ def fetch(sources: Path, out: Path, states: list[str] | None = None,
         for e in entries:
             state, title = e["state"], e["title"]
             if "url" in e:
-                urls = [e["url"]]
+                links = [(e["url"], "")]
             else:
                 if not p.allowed(e["page"]):
                     results.append(Fetched(state, title, e["page"], None, "blocked",
@@ -209,22 +233,27 @@ def fetch(sources: Path, out: Path, states: list[str] | None = None,
                 try:
                     r = p.get(e["page"])
                     r.raise_for_status()
-                    urls = discover(r.text, str(r.url), e.get("match", "(?i)pdl"), e.get("max", 3))
+                    links = discover(r.text, str(r.url), e.get("match", "(?i)pdl"),
+                                     e.get("max", 3), bool(e.get("newest_first")))  # fmt: skip
                 except httpx.HTTPError as err:
                     results.append(Fetched(state, title, e["page"], None, "error",
                                            detail=type(err).__name__))  # fmt: skip
                     continue
-                if not urls:
+                if not links:
                     results.append(Fetched(state, title, e["page"], None, "not_found",
                                            detail="no matching PDF links on the page"))  # fmt: skip
-            for url in urls:
+                    for url, label in files_on_page(r.text, str(r.url)):
+                        print(f"[sync] {state} on the page:  {url} ({label})", flush=True)
+            for url, label in links:
                 if url in seen:
                     continue
                 seen.add(url)
                 f = _download(p, state, title, e.get("url") or e["page"], url, folder,
-                              previous.get(url), by_sha)  # fmt: skip
+                              previous.get(url), by_sha, label)  # fmt: skip
+                f.label = label
                 results.append(f)
-                print(f"[sync] {state} {f.status:12} {url} {f.detail}", flush=True)
+                shown = f" ({label})" if label else ""
+                print(f"[sync] {state} {f.status:12} {url}{shown} {f.detail}", flush=True)
     finally:
         if own:
             client.close()
@@ -251,9 +280,10 @@ def fetch_and_build(sources: Path, out: Path, states: list[str] | None = None, l
     for e in ledger:  # oldest first: the first sighting is when the file was first seen
         if e.get("file"):
             name = Path(unquote(urlparse(e.get("url") or "").path)).stem
+            title = f"{e.get('label', '')} {e.get('title', '')}".strip()  # the link's text first
             hints.setdefault(
                 Path(e["file"]).stem,
-                {"title": e.get("title", ""), "name": name, "first_seen": e.get("fetched_at", "")},
+                {"title": title, "name": name, "first_seen": e.get("fetched_at", "")},
             )
     res = run_folder(out / "pdfs", s, by_file, llm=llm, source="state Medicaid PDLs (public PDFs)",
                      hints=hints)  # fmt: skip

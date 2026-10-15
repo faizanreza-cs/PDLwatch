@@ -465,6 +465,31 @@ class _State:
 Trace = dict[int, list[tuple[Line, "Layout | None", str]]]
 
 
+def _side_by_side(line: Line) -> float | None:
+    """Where the second of two tables printed side by side under one header line starts
+    ("Drug Name | Tier | Restrictions | Drug Name | Tier | Restrictions"), if this is one."""
+    roles = [role(p.text) for p in line.phrases]
+    half = len(roles) // 2
+    if len(roles) < 4 or len(roles) % 2 or roles[:half] != roles[half:] or "drug" not in roles:
+        return None
+    return line.phrases[half].x0 - 2
+
+
+def _sides(page: Page) -> list[Page]:
+    """A page holding two tables side by side, as two pages read one after the other (left,
+    then right); any other page as it is."""
+    split = next((x for ln in page.lines if (x := _side_by_side(ln)) is not None), None)
+    if split is None:
+        return [page]
+    halves = []
+    for keep in (lambda x: x < split, lambda x: x >= split):
+        lines = [Line(ph) for ln in page.lines
+                 if (ph := [p for p in ln.phrases if keep(p.x0)])]  # fmt: skip
+        halves.append(Page(page.number, page.width, page.height, lines, page.ocr, page.image,
+                           page.ocr_failed))  # fmt: skip
+    return halves
+
+
 def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], set[int]]:
     """Every table or list row in the document, and the pages they came from.
 
@@ -472,6 +497,7 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
     and what the line was taken for: header, heading, row or skipped.
     """
     s = _State()
+    pages = [half for page in pages for half in _sides(page)]
 
     def note(page: Page, line: Line, what: str) -> None:
         if trace is not None:
@@ -582,9 +608,14 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
     listed = [r for r in LIST_ROLES if r in cells]
     starts = any(r in cells for r in keys) or bool(listed) if keys or listed else "drug" in cells
     reread = False
-    if not starts and keys and "drug" in cells and _whole_drug(cells["drug"].text):
+    # the row above on this page and under this header: nothing continues across either
+    last = s.rows[-1] if len(s.rows) > s.block and s.rows[-1].page == page.number else None
+    first = len(s.rows) == s.block and not page.ocr  # the first name under a header on a page
+    if not starts and keys and "drug" in cells and (_whole_drug(cells["drug"].text) or first):
         # a drug on its own with an empty status: re-read the cell (OCR drops short tokens
-        # like "T2"), else start the row anyway and let review fill the status in
+        # like "T2"), else start the row anyway and let review fill the status in; the first
+        # name under a header can't continue anything, so it starts a row too (its tier may sit
+        # beside its next line)
         for k in keys:
             col = next(c for c in s.layout.columns if c.role == k)
             text = page.ocr_region(col.x0, line.top - 2, col.x1, line.bottom + 2)
@@ -592,6 +623,22 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
                 cells[k] = Cell(text, 50.0)
                 reread = True
         starts = True
+    if (
+        starts
+        and "drug" in cells
+        and last is not None
+        and keys
+        and not page.ocr
+        and not any(last.cells.get(k) for k in keys)
+        and _wrapped_part(cells["drug"].text)
+    ):
+        # the name wrapped and its tier or status sits beside the second line, as cells
+        # centred vertically put it ("ibuprofen oral tablet" / "400 mg, 600 mg, 800 | 1")
+        for r, c in cells.items():
+            last.cells[r] = (last.cells.get(r, "") + " " + c.text).strip()
+        last.evidence += " / " + line.text
+        last.lines += 1
+        return
     if starts and "drug" in cells:
         raw = {r: c.text for r, c in cells.items()}
         if listed and "status" not in raw and "tier" not in raw:
@@ -604,14 +651,25 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
                              min(c.conf for c in cells.values()), line.text,
                              frozenset(s.layout.roles()), reread=reread, y=line.top))  # fmt: skip
         return
-    if s.rows and s.rows[-1].page == page.number:  # a wrapped cell continues the last row
-        last = s.rows[-1]
+    if last is not None:  # a wrapped cell continues the last row
         for r, c in cells.items():
             last.cells[r] = (last.cells.get(r, "") + " " + c.text).strip()
             if r == "class":
                 s.drug_class = last.drug_class = last.cells["class"]
         last.evidence += " / " + line.text
         last.lines += 1
+
+
+def _wrapped_part(text: str) -> bool:
+    """The rest of a name that wrapped: a strength, a dose form or a lower-case word, never
+    the start of another product."""
+    t = text.strip()
+    return bool(t) and (
+        t[0].isdigit()
+        or t[0] == "("
+        or bool(_FORM_ONLY.match(t))
+        or (t[0].islower() and not _whole_drug(t))
+    )
 
 
 def _continues(prev: str, text: str) -> bool:
