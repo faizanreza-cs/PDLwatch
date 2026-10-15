@@ -115,7 +115,19 @@ Every row that isn't accepted says why. Across all 106 PDFs:
 | PA, QL or ST cell unreadable | 74 | "Ne" or "bes" in a Yes / No column |
 
 A row can have more than one reason. `pdlwatch review --out review.csv` writes the queue with
-the source page and line for a reviewer to work through.
+the source page and line for a reviewer to work through, and a `decision` column for each row:
+`accept` (right as read), `correct` (with the corrected status, PA, ST, QL or product) or
+`reject` (a note or header, not a drug). `pdlwatch review --apply review.csv --reviewer NAME`
+checks the file and appends the decisions to a log next to the warehouse; a file with any bad
+line records nothing. Every build and sync applies the latest decision for each row, so a
+decision made once holds on every run after it.
+
+A decision belongs to what the row was read from: the text of its page, the position of its line
+and the name as printed. The same PDF read again, or a re-saved copy, keeps its decisions; a
+page that changed sends its rows back for review. `results.json` then reports, for each review
+reason, how many decisions a reviewer made and how many corrected or rejected the row: the
+measured error rate behind each reason. Decisions on accepted rows (an audit) measure the error
+rate of automatic acceptance the same way.
 
 ## What the table looks like
 
@@ -187,6 +199,7 @@ pdlwatch state Ohio --class GLP-1              # one state's list for one class
 pdlwatch changes --state TX                    # what changed between versions
 pdlwatch alerts --watchlist watchlists/example.yaml   # the changes a team watches, rated
 pdlwatch review --out review.csv               # the review queue, with sources
+pdlwatch review --apply review.csv --reviewer Faizan   # decisions that hold on every run after
 pdlwatch extract path/to/pdl.pdf --out rows.csv   # any PDL or PA criteria PDF
 PDLWATCH_DB=data/mine.duckdb pdlwatch extract path/to/folder/   # a folder into its own warehouse
 make api                                        # http://localhost:8000/docs
@@ -280,10 +293,11 @@ role for the agent and API), and the repo carries starter kits for
 
 ## Tests and evals
 
-**166 offline tests** cover table and list parsing on hand-built pages (including layouts
+**170 offline tests** cover table and list parsing on hand-built pages (including layouts
 copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns),
-legends and Medicaid rules, review reasons for scans, effective dates from titles and file names,
-change detection, point-in-time history and alerts, the RxNorm lexicon on a sample release, the
+legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they
+measure, effective dates from titles and file names, change detection, point-in-time history and
+alerts, the RxNorm lexicon on a sample release, the
 extraction cache and the downloader against a fake server, the pipeline end to end on a small
 corpus, the agent, SQL guard, LLM grounding checks and the API.
 

@@ -64,9 +64,12 @@ def main(argv: list[str] | None = None) -> int:
     ch = sub.add_parser("changes", help="changes between PDL versions")
     ch.add_argument("--state")
     ch.add_argument("--drug")
-    rv = sub.add_parser("review", help="rows waiting for review (CSV with --out)")
+    rv = sub.add_parser("review", help="rows waiting for review (CSV with --out); record "
+                        "decisions made on one with --apply")  # fmt: skip
     rv.add_argument("--state")
-    rv.add_argument("--out", type=Path)
+    rv.add_argument("--out", type=Path, help="write the queue as a CSV with decision columns")
+    rv.add_argument("--apply", type=Path, help="a review CSV with decisions filled in")
+    rv.add_argument("--reviewer", help="who made the decisions (with --apply)")
     q = sub.add_parser("query", help="run a saved query (no name: list them)")
     q.add_argument("name", nargs="?")
     s = sub.add_parser("sql", help="run a guarded read-only Snowflake SQL query")
@@ -187,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "changes":
         out, err = tools.execute("pdl_changes", {"state": args.state, "drug": args.drug})
     elif args.cmd == "review":
+        if args.apply:
+            return _apply_review(args.apply, args.reviewer)
         if args.out:
             return _review_csv(args.state, args.out)
         out, err = tools.execute("review_queue", {"state": args.state, "limit": 50})
@@ -267,15 +272,37 @@ def _extract(args: argparse.Namespace) -> int:
 
 
 def _review_csv(state: str | None, out: Path) -> int:
-    """The review queue as a CSV a reviewer can work through (source page and text included)."""
+    """The review queue as a CSV a reviewer can work through (source page and text included),
+    with empty decision columns to fill in."""
+    from pdlwatch import review
     from pdlwatch.agent.tools import resolve_state
     from pdlwatch.warehouse import get_warehouse
 
     where = f"WHERE state = '{resolve_state(state)}'" if state else ""
     df = get_warehouse().query(f"SELECT * FROM review_queue {where} ORDER BY doc_id, page")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(out, index=False)
-    print(f"wrote {len(df)} rows to {out}")
+    print(f"wrote {review.to_csv(df, out)} rows to {out}; fill in the decision columns and run "
+          f"pdlwatch review --apply {out} --reviewer YOUR_NAME")  # fmt: skip
+    return 0
+
+
+def _apply_review(path: Path, reviewer: str | None) -> int:
+    """Record the decisions filled in on a review CSV; they apply from the next build or sync."""
+    from pdlwatch import review
+    from pdlwatch.config import get_settings
+
+    if not reviewer:
+        print("name the reviewer: --reviewer NAME", file=sys.stderr)
+        return 2
+    decisions, errors = review.read_csv(path)
+    for e in errors:
+        print(e, file=sys.stderr)
+    if errors:
+        print(f"nothing recorded: fix the {len(errors)} line(s) above and apply again",
+              file=sys.stderr)  # fmt: skip
+        return 1
+    log = review.decisions_path(get_settings().db_path)
+    n = review.record(log, decisions, reviewer)
+    print(f"recorded {n} decision(s) in {log}; the next build or sync applies them")
     return 0
 
 

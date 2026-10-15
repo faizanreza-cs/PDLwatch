@@ -22,6 +22,7 @@ import pandas as pd
 
 from pdlwatch import changes as changes_mod
 from pdlwatch import history
+from pdlwatch import review as review_mod
 from pdlwatch.cache import DocCache, extractor_key, file_sha256
 from pdlwatch.config import Settings, cache_path, corpus_path, get_settings, results_path
 from pdlwatch.drugs import PRODUCTS, rxcui
@@ -91,28 +92,38 @@ def _products(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([known, extra[list(known.columns)]], ignore_index=True)
 
 
-def tables(results: list[DocResult], source: str) -> dict[str, pd.DataFrame]:
+Decisions = dict[str, dict[str, Any]]
+
+
+def tables(results: list[DocResult], source: str,
+           decisions: Decisions | None = None) -> dict[str, pd.DataFrame]:  # fmt: skip
+    """The warehouse tables. ``decisions``: reviewers' decisions by row key (``review.load``);
+    what they measured is kept in ``formulary_rows.attrs["review"]``."""
     docs = pd.DataFrame([{**r.summary(), "source": source} for r in results])
     docs["state_name"] = docs["state"].map(STATES)
     docs["file"] = docs["path"].map(lambda p: Path(p).name)
     rows = pd.DataFrame([{**row.to_dict(), "effective": r.effective}
                          for r in results for row in r.rows])  # fmt: skip
     if rows.empty:
-        rows = pd.DataFrame(columns=list(SCHEMA["formulary_rows"]))
+        rows = pd.DataFrame(columns=[c for c in SCHEMA["formulary_rows"] if c != "reviewed"])
+    rows, stats = review_mod.apply(rows, decisions or {})
     rows = rows[list(SCHEMA["formulary_rows"])]
-    # the latest PDL per state is the access table; rows awaiting review stay out of it
+    rows.attrs["review"] = stats
+    # the latest PDL per state is the access table; rows awaiting review stay out of it, and
+    # rows a reviewer rejected (not drug rows) stay out of everything but formulary_rows
     latest = history.latest_pdls(docs)
     access = rows[rows["doc_id"].isin(latest) & rows["accepted"] & rows["product"].notna()].copy()
     access["state_name"] = access["state"].map(STATES)
-    review = rows[~rows["accepted"]]
+    kept = rows[rows["reviewed"] != "reject"]
+    review = kept[~kept["accepted"]]
     out = {
         "documents": docs[list(SCHEMA["documents"])],
         "formulary_rows": rows,
         "drug_access": access[list(SCHEMA["drug_access"])],
         "review_queue": review[list(SCHEMA["review_queue"])],
-        "changes": changes_mod.detect(rows, docs),
-        "drug_access_history": history.build(rows, docs),
-        "products": _products(rows),
+        "changes": changes_mod.detect(kept, docs),
+        "drug_access_history": history.build(kept, docs),
+        "products": _products(kept),
         "states": pd.DataFrame({"state": list(STATES), "state_name": list(STATES.values())}),
     }  # fmt: skip
     return out
@@ -157,6 +168,7 @@ def summary(results: list[DocResult], tabs: dict[str, pd.DataFrame], seconds: fl
             "methods": rows["method"].value_counts().to_dict(),
         },
         "review_reasons": dict(reasons.most_common()),
+        **({"review_decisions": rows.attrs["review"]} if rows.attrs.get("review") else {}),
         "failed_documents": [
             {"doc_id": r.doc_id, "error": r.title} for r in results if r.doc_type == "error"
         ],  # fmt: skip
@@ -181,7 +193,7 @@ def build(settings: Settings | None = None, seed: int = 7, llm: Any = None,
     t0 = time.perf_counter()
     results = extract_all(jobs, llm, workers)
     seconds = time.perf_counter() - t0
-    tabs = tables(results, "synthetic")
+    tabs = tables(results, "synthetic", review_mod.load(review_mod.decisions_path(s.db_path)))
     out = summary(results, tabs, seconds, "synthetic")
     out["extraction"] = {"all": evaluate(results, truth)["groups"],
                          "test": evaluate(results, truth, "test")["groups"]}  # fmt: skip
@@ -239,7 +251,7 @@ def run_folder(folder: Path, settings: Settings | None = None,
     t0 = time.perf_counter()
     results = extract_all(jobs, llm, workers, store)
     date_hints(results, hints or {})
-    tabs = tables(results, source)
+    tabs = tables(results, source, review_mod.load(review_mod.decisions_path(s.db_path)))
     out = summary(results, tabs, time.perf_counter() - t0, source)
     out["extractor"] = "llm" if llm else "rules"
     if store is not None:

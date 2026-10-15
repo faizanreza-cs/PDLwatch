@@ -14,6 +14,7 @@ from pdlwatch.extract import layout, prose
 from pdlwatch.extract import legend as legend_mod
 from pdlwatch.extract.rows import Row, dedupe, from_raw, score
 from pdlwatch.pdf import Page, load
+from pdlwatch.review import row_key
 from pdlwatch.synth.states import BY_NAME as STATE_CODES
 
 _MONTHS = (
@@ -194,6 +195,9 @@ def extract_document(path: str | Path, doc_id: str | None = None, state: str | N
         rows += [prose.to_row(p, doc_id, state) for p in prose.extract(pages, table_pages)]
     rows = [r for r in rows if r.product or _worth_review(r.drug_text)]
     rows = dedupe(score(rows))
+    texts = {p.number: p.text for p in pages}
+    for r in rows:
+        r.row_key = row_key(texts.get(r.page, ""), r.y, r.drug_text)
     title = pages[0].lines[0].text if pages and pages[0].lines else path.stem
     doc_type = _doc_type(title, head, bool(table_pages))
     effective, effective_from = _effective(pages)

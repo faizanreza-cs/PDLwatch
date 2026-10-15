@@ -58,6 +58,7 @@ class Row:
     accepted: bool = True
     y: float | None = None  # top of the source line on the page (tables and lists)
     rxcui: str | None = None  # RxNorm concept id of the product, when the lexicon is loaded
+    row_key: str | None = None  # what it was read from, for review decisions (review.row_key)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
