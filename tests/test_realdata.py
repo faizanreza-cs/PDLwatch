@@ -5,6 +5,7 @@ import httpx
 import yaml
 
 from pdlwatch import realdata
+from pdlwatch.sheet import check_profile
 from pdlwatch.synth.states import STATES
 
 PDF = b"%PDF-1.4 fake body"
@@ -104,6 +105,7 @@ def test_sources_file_is_well_formed():
         assert e["state"] in STATES and e["title"]
         assert ("url" in e) != ("page" in e)
         assert (e.get("url") or e["page"]).startswith("https://")
+        assert check_profile(e["profile"]) == [] if "profile" in e else True
     assert len({e["state"] for e in entries}) >= 15
 
 
@@ -238,5 +240,7 @@ def test_files_no_listed_source_selects_leave_the_tables():
                 "match": "(?i)^(?!.*frequently asked).*(preferred drug list|pdl)"}]  # fmt: skip
     # the older version the page still matches stays: it is the list's history
     assert realdata.retired(entries, ledger) == {"WA-old-pdl-1", "WV-faq-3"}
+    # a file is read with the profile of the source that selects it
+    assert realdata.selecting(entries, ledger)["WV-pdl-4"] is entries[0]
     entries.append({"state": "WA", "title": "WA", "url": old})
     assert realdata.retired(entries, ledger) == {"WV-faq-3"}

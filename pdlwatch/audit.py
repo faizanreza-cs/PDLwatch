@@ -13,6 +13,7 @@ layout is checked before its rows are trusted.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Any
 
@@ -21,25 +22,28 @@ import pandas as pd
 from pdlwatch.extract import layout
 from pdlwatch.extract.document import effective_source
 from pdlwatch.pdf import Line, Page, file_dates, load
+from pdlwatch.sheet import columns, is_sheet
 from pdlwatch.warehouse import get_warehouse
 
 
 @lru_cache(maxsize=16)
-def _pages(path: str) -> tuple[Page, ...]:
-    return tuple(load(path))
+def _pages(path: str, profile: str | None = None) -> tuple[Page, ...]:
+    """The pages as the document was read: a spreadsheet through its source profile (JSON)."""
+    return tuple(load(path, profile=json.loads(profile) if profile else None))
 
 
 def _show(line: Line) -> str:
     return " | ".join(f"{p.text} @{p.x0:.0f}" for p in line.phrases)
 
 
-def context(path: str, page: int, drug_text: str, y: float | None = None) -> dict[str, Any]:
+def context(path: str, page: int, drug_text: str, y: float | None = None,
+            profile: str | None = None) -> dict[str, Any]:  # fmt: skip
     """The source line of a row and the nearest header line above it on the same page.
 
     The line is the one at the row's position ``y`` when known, else the first one that
-    contains the drug's name.
+    contains the drug's name. ``profile``: the document's source profile (JSON), if any.
     """
-    pg = _pages(path)[page - 1]
+    pg = _pages(path, profile)[page - 1]
     key = drug_text.split("(")[0].strip().lower()[:24]
     found = None
     if y is not None and y == y and pg.lines:  # y == y: not NaN
@@ -56,14 +60,15 @@ def context(path: str, page: int, drug_text: str, y: float | None = None) -> dic
 
 
 def inspect(path: str, pages: list[int], width: int = 48) -> list[str]:
-    """How the parser reads ``pages`` of one PDF, as printable lines."""
+    """How the parser reads ``pages`` of one PDF, as printable lines. For a spreadsheet, each
+    column's values come first (to write a source profile from); its pages are shown as filed."""
     doc = list(_pages(path))
     wanted = sorted({p for p in pages if 1 <= p <= len(doc)})
     if not wanted:
         return [f"{path}: no such page (it has {len(doc)})"]
     trace: layout.Trace = {}
     rows, _ = layout.parse(doc[: wanted[-1]], trace)
-    out = []
+    out = columns(path) if is_sheet(path) else []
     if 1 in wanted:
         d, origin, words = effective_source(doc)
         where = f" ({origin}) from: ...{words}..." if d else ""
@@ -98,7 +103,7 @@ def sample(n: int = 40, seed: int = 1, state: str | None = None) -> pd.DataFrame
     if state:
         where += f" AND r.state = '{state.upper()[:2]}'"
     rows = wh.query(f"""SELECT r.doc_id, r.state, r.page, r.y, r.method, r.drug_text, r.product,
-                               r.status, r.tier, r.pa, r.ql, r.st, d.file
+                               r.status, r.tier, r.pa, r.ql, r.st, d.file, d.profile
                         FROM formulary_rows r JOIN documents d ON d.doc_id = r.doc_id
                         WHERE {where}""")  # fmt: skip
     picked = rows.sample(min(n, len(rows)), random_state=seed) if len(rows) else rows
@@ -115,7 +120,8 @@ def report(n: int = 40, seed: int = 1, state: str | None = None,
     base = Path(folder) if folder else corpus_path(get_settings().db_path) / "pdfs"
     out = []
     for r in sample(n, seed, state).itertuples():
-        ctx = context(str(base / r.file), int(r.page), str(r.drug_text), r.y)
+        profile = r.profile if isinstance(r.profile, str) and r.profile else None
+        ctx = context(str(base / r.file), int(r.page), str(r.drug_text), r.y, profile)
         out.append({"doc": r.doc_id, "page": r.page, "method": r.method, "drug": r.drug_text,
                     "status": r.status, "tier": r.tier, "pa": r.pa, "ql": r.ql, **ctx})  # fmt: skip
     return out

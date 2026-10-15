@@ -178,27 +178,35 @@ def read_ledger(out: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def selecting(entries: list[dict[str, Any]],
+              ledger: list[dict[str, Any]]) -> dict[str, dict[str, Any] | None]:  # fmt: skip
+    """For each archived file (by stem), the listed source that selects it: an entry with its
+    address as ``url``, or with the ``page`` it was found on and a ``match`` its address or link
+    text still matches. None when no listed source selects it any more."""
+
+    def selects(s: dict[str, Any], e: dict[str, Any]) -> bool:
+        if s["state"] != e.get("state"):
+            return False
+        if "url" in s:
+            return bool(s["url"] == e.get("url"))
+        text = f"{e.get('url') or ''} {e.get('label') or ''}"
+        return s.get("page") == e.get("source") and bool(re.search(s.get("match", MATCH), text))
+
+    out: dict[str, dict[str, Any] | None] = {}
+    for e in ledger:
+        if e.get("file"):
+            stem = Path(e["file"]).stem
+            if out.get(stem) is None:
+                out[stem] = next((s for s in entries if selects(s, e)), None)
+    return out
+
+
 def retired(entries: list[dict[str, Any]], ledger: list[dict[str, Any]]) -> set[str]:
     """Archived files no listed source selects any more: the entry that fetched them was
     removed from the sources file, or its page's ``match`` was narrowed to leave them out (a
     stale copy, a FAQ). They stay in the archive but out of the tables, so the sources file
     decides what is delivered. Older versions a listed page still matches stay in: history."""
-
-    def selected(e: dict[str, Any]) -> bool:
-        text = f"{e.get('url') or ''} {e.get('label') or ''}"
-        return any(
-            s["state"] == e.get("state")
-            and (s.get("url") == e.get("url")
-                 or (s.get("page") == e.get("source") and re.search(s.get("match", MATCH), text)))
-            for s in entries
-        )  # fmt: skip
-
-    kept: dict[str, bool] = {}
-    for e in ledger:
-        if e.get("file"):
-            stem = Path(e["file"]).stem
-            kept[stem] = kept.get(stem, False) or selected(e)
-    return {stem for stem, keep in kept.items() if not keep}
+    return {stem for stem, s in selecting(entries, ledger).items() if s is None}
 
 
 def _download(p: Politeness, state: str, title: str, source: str, url: str, folder: Path,
@@ -344,11 +352,14 @@ def fetch_and_build(sources: Path, out: Path, states: list[str] | None = None, l
                 Path(e["file"]).stem,
                 {"title": title, "name": name, "first_seen": e.get("fetched_at", "")},
             )
-    gone = retired(entries, ledger)
+    chosen = selecting(entries, ledger)
+    gone = {stem for stem, e in chosen.items() if e is None}
     for stem in sorted(gone):
         print(f"[sync] left out      {stem}: no listed source selects it any more", flush=True)
+    # a spreadsheet is read through the profile of the source that selects it
+    profiles = {stem: e["profile"] for stem, e in chosen.items() if e and e.get("profile")}
     res = run_folder(out / "pdfs", s, by_file, llm=llm, source="state Medicaid PDLs (public PDFs)",
-                     hints=hints, skip=gone)  # fmt: skip
+                     hints=hints, skip=gone, profiles=profiles)  # fmt: skip
     statuses: dict[str, int] = {}
     for f in got:
         statuses[f.status] = statuses.get(f.status, 0) + 1

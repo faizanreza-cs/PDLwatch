@@ -23,7 +23,7 @@ import pandas as pd
 from pdlwatch import changes as changes_mod
 from pdlwatch import history
 from pdlwatch import review as review_mod
-from pdlwatch.cache import DocCache, extractor_key, file_sha256
+from pdlwatch.cache import DocCache, extractor_key, file_sha256, profile_key
 from pdlwatch.config import Settings, cache_path, corpus_path, get_settings, results_path
 from pdlwatch.drugs import PRODUCTS, rxcui
 from pdlwatch.evaluate import evaluate
@@ -37,40 +37,48 @@ from pdlwatch.warehouse import SCHEMA, reset_cache
 Job = tuple[str, str | None, str | None]  # path, doc_id, state
 
 
-def _extract(job: Job, llm: Any = None) -> DocResult:
+Profiles = dict[str, dict[str, Any]]
+
+
+def _extract(job: Job, profile: dict[str, Any] | None = None, llm: Any = None) -> DocResult:
     path, doc_id, state = job
     try:
-        return extract_document(path, doc_id, state, llm=llm)
+        return extract_document(path, doc_id, state, llm=llm, profile=profile)
     except Exception as e:  # one unreadable PDF must not stop a run of hundreds
         detail = f"{type(e).__name__}: {e}"[:200]
         return DocResult(doc_id or Path(path).stem, path, state, None, detail, "error", 0, 0, [])
 
 
 def extract_all(jobs: list[Job], llm: Any = None, workers: int = 4,
-                cache: DocCache | None = None) -> list[DocResult]:  # fmt: skip
+                cache: DocCache | None = None,
+                profiles: Profiles | None = None) -> list[DocResult]:  # fmt: skip
     """Extract documents in parallel: processes for parsing and OCR, threads when an LLM is used
     (provider clients don't cross process boundaries, and the calls are network-bound).
 
     With a ``cache``, documents extracted before (same bytes, same extractor) are loaded instead,
-    so a run's cost follows the number of new PDFs, not the size of the archive.
+    so a run's cost follows the number of new PDFs, not the size of the archive. ``profiles``
+    maps a file's path to its source profile (spreadsheets, ``sheet.py``).
     """
     shas = [file_sha256(path) for path, _, _ in jobs]
+    profs = [(profiles or {}).get(path) for path, _, _ in jobs]
+    keys = [f"{sha}-{profile_key(p)}" if p else sha for sha, p in zip(shas, profs, strict=True)]
     results: list[DocResult | None] = [None] * len(jobs)
     if cache is not None:
         for i, (path, doc_id, state) in enumerate(jobs):
-            results[i] = cache.get(shas[i], path, doc_id or Path(path).stem, state)
+            results[i] = cache.get(keys[i], path, doc_id or Path(path).stem, state)
     todo = [i for i, r in enumerate(results) if r is None]
     if todo:
         spawn = mp.get_context("spawn")
         pool: Executor = (ThreadPoolExecutor(workers) if llm else
                           ProcessPoolExecutor(workers, mp_context=spawn))  # fmt: skip
         with pool as ex:
-            done = ex.map(partial(_extract, llm=llm), [jobs[i] for i in todo])
+            done = ex.map(partial(_extract, llm=llm), [jobs[i] for i in todo],
+                          [profs[i] for i in todo])  # fmt: skip
             for i, res in zip(todo, done, strict=True):
                 res.sha256 = shas[i]
                 results[i] = res
                 if cache is not None:
-                    cache.put(shas[i], res)
+                    cache.put(keys[i], res)
     out = [r for r in results if r is not None]
     for r, sha in zip(out, shas, strict=True):
         r.sha256 = sha
@@ -237,10 +245,12 @@ def run_folder(folder: Path, settings: Settings | None = None,
                states: dict[str, str] | None = None, llm: Any = None, workers: int = 4,
                source: str = "pdf folder", cache: bool = True,
                hints: dict[str, dict[str, str]] | None = None,
-               skip: set[str] | None = None) -> dict[str, Any]:  # fmt: skip
+               skip: set[str] | None = None,
+               profiles: Profiles | None = None) -> dict[str, Any]:  # fmt: skip
     """Any folder of PDFs and spreadsheets (real state PDLs). ``states`` maps file stem ->
     state code; ``hints`` maps file stem -> {title, name, first_seen} from the fetch ledger;
-    files whose stem is in ``skip`` are left out.
+    files whose stem is in ``skip`` are left out; ``profiles`` maps file stem -> the source
+    profile a spreadsheet is read with.
 
     PDFs extracted by an earlier run (same bytes, same extractor) come from the cache next to
     the warehouse, so a weekly run only pays for what changed.
@@ -254,7 +264,8 @@ def run_folder(folder: Path, settings: Settings | None = None,
     jobs: list[Job] = [(str(f), f.stem, (states or {}).get(f.stem)) for f in files]
     store = DocCache(cache_path(s.db_path) / "docs", extractor_key(llm)) if cache else None
     t0 = time.perf_counter()
-    results = extract_all(jobs, llm, workers, store)
+    by_path = {str(f): (profiles or {})[f.stem] for f in files if f.stem in (profiles or {})}
+    results = extract_all(jobs, llm, workers, store, by_path)
     date_hints(results, hints or {})
     tabs = tables(results, source, review_mod.load(review_mod.decisions_path(s.db_path)))
     out = summary(results, tabs, time.perf_counter() - t0, source)

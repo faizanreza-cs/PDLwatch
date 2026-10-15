@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections import Counter
@@ -57,6 +58,7 @@ class DocResult:
     sha256: str | None = None  # of the PDF's bytes
     effective_from: str | None = None  # document | title | source title | file name
     first_seen: str | None = None  # when the archive first fetched this file (real PDLs)
+    profile: dict[str, Any] | None = None  # the source profile it was read with (sheet.py)
 
     def summary(self) -> dict[str, Any]:
         methods = Counter(r.method for r in self.rows)
@@ -69,6 +71,7 @@ class DocResult:
             "methods": dict(methods), "seconds": round(self.seconds, 2),
             "llm_calls": self.llm_calls, "sha256": self.sha256,
             "effective_from": self.effective_from, "first_seen": self.first_seen,
+            "profile": json.dumps(self.profile, sort_keys=True) if self.profile else None,
         }  # fmt: skip
 
 
@@ -175,13 +178,14 @@ def _default_status(head: str, raw: list[layout.RawRow]) -> str | None:
 
 
 def extract_document(path: str | Path, doc_id: str | None = None, state: str | None = None,
-                     llm: Any = None) -> DocResult:  # fmt: skip
+                     llm: Any = None,
+                     profile: dict[str, Any] | None = None) -> DocResult:  # fmt: skip
     """Extract every formulary row from one PDF or spreadsheet. ``llm``: an ``LLMExtractor`` for
-    prose pages."""
+    prose pages; ``profile``: the source's profile for a spreadsheet (``sheet.py``)."""
     t0 = time.perf_counter()
     path = Path(path)
     doc_id = doc_id or path.stem
-    pages = load(path)
+    pages = load(path, profile=profile)
     spreadsheet = is_sheet(path)
     head = " ".join(ln.text for ln in pages[0].lines[:6]) if pages else ""
     state = state or _state(head)
@@ -212,7 +216,7 @@ def extract_document(path: str | Path, doc_id: str | None = None, state: str | N
     return DocResult(doc_id, str(path), state, effective, title, doc_type, len(pages),
                      sum(p.ocr for p in pages), rows, leg.codes, time.perf_counter() - t0, calls,
                      complete=not any(p.ocr_failed for p in pages),
-                     effective_from=effective_from)  # fmt: skip
+                     effective_from=effective_from, profile=profile)  # fmt: skip
 
 
 def _title_rows(pages: list[Page]) -> list[Page]:

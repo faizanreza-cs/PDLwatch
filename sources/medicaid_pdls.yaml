@@ -6,6 +6,10 @@
 #          downloaded (up to `max`, in page order, or the newest-looking first with
 #          `newest_first: true`). State sites rename files every quarter, so a page is often
 #          the more stable address.
+# A spreadsheet the parser can't read as it is takes a `profile`: `columns` to keep, renamed to
+# header words the parser knows, and `rows` to keep (a column and the value it must hold). The
+# rest is dropped and repeated rows collapse into one. `pdlwatch inspect FILE --pages 1` lists
+# each column's values to write one from.
 #
 # `fetch` sends one request per second, identifies itself, honours robots.txt, and skips (and
 # reports) anything that fails. Links go stale as states publish new versions: a failed entry is
@@ -163,6 +167,16 @@
   match: "(?i)apple-health-pdl-20[0-9]{6}"  # one dated workbook per week; the PDF is from 2020
   newest_first: true
   max: 2
+  # one row per package (NDC) in 23 coded columns: the drugs on the PDL (AHPDL inclusion Y),
+  # with the pharmacy benefit's status (P / N) and PA (Y / N); the medical benefit's are left
+  profile:
+    columns:
+      APPLE HEALTH DRUG CLASS: Drug Class
+      LABEL NAME: Drug Name
+      PHARMACY PREFERRED STATUS: Preferred Status
+      PHARMACY PA STATUS: PA Status
+    rows:
+      AHPDL INCLUSION: "Y"
 
 - state: WV
   title: West Virginia Medicaid PDL page

@@ -22,7 +22,7 @@ from pdlwatch.config import Settings, get_settings
 SCHEMA: dict[str, tuple[str, ...]] = {
     "documents": ("doc_id", "state", "state_name", "title", "doc_type", "effective",
                   "effective_from", "first_seen", "pages", "ocr_pages", "rows", "accepted",
-                  "review", "source", "file", "sha256"),
+                  "review", "source", "file", "sha256", "profile"),
     "formulary_rows": ("doc_id", "state", "effective", "page", "y", "method", "drug_text",
                        "drug_class", "product", "ingredient", "kind", "rxcui", "status", "tier",
                        "pa", "st", "ql", "ql_detail", "bvg", "ocr", "confidence", "accepted",

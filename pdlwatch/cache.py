@@ -1,8 +1,9 @@
 """Extraction results cached by content, so a run only extracts the PDFs it hasn't seen.
 
 A document's key is the sha256 of its bytes plus a hash of everything that shapes its rows: the
-extraction code (``pdf.py``, ``drugs.py``, ``extract/``), the Tesseract version and whether an
-LLM read the prose (and which model). Change any of them and the old entries simply stop
+extraction code (``pdf.py``, ``sheet.py``, ``drugs.py``, ``extract/``), the Tesseract version and
+whether an LLM read the prose (and which model); a spreadsheet read through a source profile adds
+the profile's hash (``profile_key``). Change any of them and the old entries simply stop
 matching, so a cache never serves rows from an older extractor.
 
 Only complete results are cached: a scan whose pages couldn't be OCR'd is extracted again
@@ -36,7 +37,13 @@ def file_sha256(path: str | Path) -> str:
 @lru_cache(maxsize=1)
 def _code_hash() -> str:
     h = hashlib.sha256()
-    for f in sorted([_PKG / "pdf.py", _PKG / "drugs.py", *(_PKG / "extract").glob("*.py")]):
+    files = [
+        _PKG / "pdf.py",
+        _PKG / "sheet.py",
+        _PKG / "drugs.py",
+        *(_PKG / "extract").glob("*.py"),
+    ]
+    for f in sorted(files):
         h.update(f.name.encode() + f.read_bytes())
     try:
         import pytesseract
@@ -45,6 +52,11 @@ def _code_hash() -> str:
     except Exception:  # no OCR here: scans won't be complete, so they won't be cached anyway
         h.update(b"no-ocr")
     return h.hexdigest()
+
+
+def profile_key(profile: dict[str, Any]) -> str:
+    """A short hash of a source profile: a file read through another profile is another entry."""
+    return hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()[:12]
 
 
 def extractor_key(llm: Any = None) -> str:
