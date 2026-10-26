@@ -227,10 +227,11 @@ one, and the next sync asks each server whether a file changed before downloadin
 against, so `pdlwatch audit` prints a random sample of accepted rows beside the line and header
 they were read from, to check by eye, and `pdlwatch inspect` shows how any page is read.
 
-It runs as a manual GitHub Actions workflow (**Actions > Real data (state Medicaid PDLs) > Run
-workflow**), which prints the results, a sample of the review queue and the audit sample in the
-log, and keeps the archive and the extraction cache between runs. State sites rename files every
-quarter; a link that fails is reported in the log as a line to update.
+It runs as a GitHub Actions workflow every morning, and on demand (**Actions > Real data (state
+Medicaid PDLs) > Run workflow**). Each run prints the results, a sample of the review queue and the
+audit sample in the log, and keeps the archive and the extraction cache for the next run (as an
+artifact, for 90 days). State sites rename files every quarter; a link that fails is reported in
+the log as a line to update.
 
 ### Results
 
@@ -347,8 +348,9 @@ tools and routing; `make eval-llm` scores a real model on the same questions.
 
 - **Real PDLs are harder than the synthetic ones.** 49% of real rows are accepted automatically
   so far; the rest wait for review ([results](#results)). Georgia's managed care formulary is
-  only partly read (a quarter of its rows accepted), 7 of the 20 states in the sources file don't
-  download yet, and class names in list layouts come from headings rather than the class column.
+  only partly read (a quarter of its rows accepted), Utah's list (downloaded since 26 October) isn't
+  read correctly yet, 6 of the 20 states in the sources file don't download yet, and class names in
+  list layouts come from headings rather than the class column.
 - **Prose needs the LLM path.** The keyword rules find every drug but get only 71% of prose
   statuses right, so all prose rows go to review. The LLM extractor is built and tested with
   fake clients, but wasn't run here (no API key in this environment).
