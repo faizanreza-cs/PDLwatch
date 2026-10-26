@@ -64,7 +64,6 @@ jobs:
       # keeps them as an artifact for 90 days: a run downloads only files that changed and extracts
       # only new versions
       - name: Restore the archive from the last successful run
-        id: archive
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -73,21 +72,9 @@ jobs:
             --json databaseId --jq '.[0].databaseId // empty')
           if [ -n "$run" ] && gh run download "$run" --name real-data-archive --dir data/real; then
             echo "Restored the archive kept by run $run"
-            echo "restored=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::No archive kept by an earlier successful run"
+            echo "::warning::No archive kept by an earlier successful run; this run starts a new one"
           fi
-      # runs before 26 October 2026 kept the archive in the Actions cache
-      - name: Restore an older archive from the cache
-        if: steps.archive.outputs.restored != 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            data/real/pdfs
-            data/real/ledger.jsonl
-            data/real/cache
-          key: real-data-
-          restore-keys: real-data-
       # drug names the dictionary doesn't know are read against RxNorm (NLM's monthly
       # prescribable release: free, no license); without it they go to review
       - name: RxNorm names
