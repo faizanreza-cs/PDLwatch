@@ -1,9 +1,11 @@
 name: Real data (state Medicaid PDLs)
 
-# Manual: downloads the public PDLs in sources/medicaid_pdls.yaml, extracts them with the same
-# pipeline as the synthetic corpus, prints the results and an audit sample, and keeps them as an
-# artifact. Nothing downloaded is committed.
+# Every morning, and on demand: downloads the public PDLs in sources/medicaid_pdls.yaml, extracts
+# them with the same pipeline as the synthetic corpus, prints the results and an audit sample, and
+# keeps them as an artifact. Nothing downloaded is committed.
 on:
+  schedule:
+    - cron: "41 6 * * *"  # 06:41 UTC, with the defaults below
   workflow_dispatch:
     inputs:
       states:
@@ -26,6 +28,15 @@ on:
         description: "Pages to print as the parser reads them: part of a file name and pages, e.g. INM-SUPDL:52,57 NYRx:33"
         required: false
         default: ""
+
+# one run at a time: each starts from the archive the last successful run kept
+concurrency:
+  group: real-data
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read  # to download the archive an earlier run kept
 
 jobs:
   sync:
@@ -51,16 +62,33 @@ jobs:
         run: |
           uv venv --allow-existing .venv
           uv pip install --python .venv/bin/python -e ".[llm,dev]"
-      # the PDF archive, ledger and extraction cache carry over: a rerun downloads only files
-      # that changed (conditional requests) and extracts only new versions
-      - name: Restore the archive from earlier runs
-        uses: actions/cache@v4
+      # the PDF archive, ledger and extraction cache carry over from the last successful run, which
+      # keeps them as an artifact for 90 days: a run downloads only files that changed and extracts
+      # only new versions
+      - name: Restore the archive from the last successful run
+        id: archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          run=$(gh run list --workflow real-data.yml --branch main --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "$run" ] && gh run download "$run" --name real-data-archive --dir data/real; then
+            echo "Restored the archive kept by run $run"
+            echo "restored=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No archive kept by an earlier successful run"
+          fi
+      # runs before 26 October 2026 kept the archive in the Actions cache
+      - name: Restore an older archive from the cache
+        if: steps.archive.outputs.restored != 'true'
+        uses: actions/cache/restore@v4
         with:
           path: |
             data/real/pdfs
             data/real/ledger.jsonl
             data/real/cache
-          key: real-data-${{ github.run_id }}
+          key: real-data-
           restore-keys: real-data-
       # drug names the dictionary doesn't know are read against RxNorm (NLM's monthly
       # prescribable release: free, no license); without it they go to review
@@ -112,6 +140,15 @@ jobs:
             data/real/results.json
             data/real/manifest.json
             data/real/ledger.jsonl
+      - name: Keep the archive for the next run
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-data-archive
+          path: |
+            data/real/pdfs
+            data/real/ledger.jsonl
+            data/real/cache
+          retention-days: 90
       - uses: actions/upload-artifact@v4
         if: inputs.keep_pdfs
         with:
