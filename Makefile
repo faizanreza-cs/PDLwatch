@@ -4,8 +4,7 @@ UV ?= uv
 .PHONY: setup corpus build test lint eval eval-llm api charts powerbi sync docker clean
 
 setup:            ## create venv and install everything (OCR also needs the tesseract binary)
-	$(UV) venv --allow-existing .venv
-	$(UV) pip install --python $(PY) -e ".[llm,dev]"
+	$(UV) sync --locked --extra llm --extra dev
 
 corpus:           ## generate the synthetic PDLs and their truth
 	$(PY) -m pdlwatch.cli corpus

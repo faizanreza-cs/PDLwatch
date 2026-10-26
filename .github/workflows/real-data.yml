@@ -59,9 +59,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: |
-          uv venv --allow-existing .venv
-          uv pip install --python .venv/bin/python -e ".[llm,dev]"
+        run: uv sync --locked --extra llm --extra dev
       # the PDF archive, ledger and extraction cache carry over from the last successful run, which
       # keeps them as an artifact for 90 days: a run downloads only files that changed and extracts
       # only new versions
