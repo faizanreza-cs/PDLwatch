@@ -425,3 +425,98 @@ def test_two_tables_side_by_side_with_tiers_beside_wrapped_names():
         ("albuterol sulfate inhalation hfa aerosol", "1", "QL (4 EA per 90 days)"),
         ("Otezla oral tablet", "2", "PA"),
     ]
+
+
+def _wide(*lines: Line) -> Page:
+    return Page(1, 900, 695, list(lines), False)
+
+
+def test_utah_tables_read_each_status_from_the_status_column():
+    # per class, a "Preferred Drugs" table and a "Non Preferred Drugs" table, each with a Status
+    # column; each header wraps over three lines, and a limit is centred on its drug's line
+    page = _wide(
+        _line(94, ("Last", 305), ("Brand", 653)),
+        _line(100, ("Preferred Drugs", 27), ("Status", 193), ("Type", 265), ("Limits", 354),
+              ("Mandatory 3-Month", 495), ("Additional Note", 713)),
+        _line(107, ("Update", 305), ("Required", 653)),
+        _line(121, ("celecoxib", 27), ("Preferred", 193), ("Generic 09/01/20", 265)),
+        _line(136, ("indomethacin, ER", 27), ("Preferred", 193), ("Generic 01/01/21", 265)),
+        _line(150, ("30 Units / 15 Days", 354)),
+        _line(156, ("Journavx", 27), ("Preferred", 193), ("Brand", 265)),
+        _line(162, ("Every 60 Days", 354)),
+        _line(176, ("Pennsaid", 27), ("Preferred", 193), ("Brand", 265)),
+        _line(191, ("Last", 305), ("Required Prior Authorization", 495), ("Brand", 653)),
+        _line(197, ("Non Preferred Drugs", 27), ("Status", 193), ("Type", 265), ("Limits", 354),
+              ("Additional Note", 713)),
+        _line(204, ("Update", 305), ("Form", 495), ("Required", 653)),
+        _line(218, ("Caldolor", 27), ("Non Preferred", 193), ("Brand", 265),
+              ("Medication Coverage Exception", 495)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    assert [(r.cells["drug"], r.cells["status"]) for r in rows] == [
+        ("celecoxib", "Preferred"),
+        ("indomethacin, ER", "Preferred"),
+        ("Journavx", "Preferred"),
+        ("Pennsaid", "Preferred"),
+        ("Caldolor", "Non Preferred"),
+    ]
+    assert "req" not in rows[1].cells  # the limit printed half above Journavx is Journavx's
+    assert rows[2].cells["req"] == "30 Units / 15 Days Every 60 Days"
+    assert rows[3].evidence == "Pennsaid Preferred Brand"  # not the next header's top line
+
+
+def test_a_header_top_line_nearer_the_header_than_the_row_above_is_the_header_s():
+    # Utah's 2024 list: rows 14 pt apart, the header's top line 8 pt above the header
+    page = _wide(
+        _line(100, ("Preferred Drugs", 26), ("Status", 174), ("Type", 238), ("Last", 274),
+              ("Limits", 317)),
+        _line(114, ("warfarin", 26), ("Preferred", 174), ("Generic 06/01/20", 238)),
+        _line(127, ("Last", 274), ("Required Prior", 443), ("Brand", 574)),
+        _line(135, ("Non Preferred Drugs", 26), ("Status", 174), ("Type", 238), ("Limits", 317)),
+        _line(151, ("Zenzedi", 26), ("Non Preferred", 174), ("Brand", 238)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    assert [(r.cells["drug"], r.cells["status"], r.evidence) for r in rows] == [
+        ("warfarin", "Preferred", "warfarin Preferred Generic 06/01/20"),
+        ("Zenzedi", "Non Preferred", "Zenzedi Non Preferred Brand"),
+    ]
+
+
+def test_a_list_after_the_pdl_without_a_status_column_is_not_read_as_the_pdl():
+    # Utah's "Drug Limits" list follows its PDL: generic and brand names, but no status
+    page = _wide(
+        _line(100, ("Non Preferred Drugs", 27), ("Status", 193), ("Type", 265), ("Limits", 354)),
+        _line(115, ("Caldolor", 27), ("Non Preferred", 193), ("Brand", 265)),
+        _line(140, ("Generic Name Drugs", 27), ("Brand Name Drugs", 209), ("Updated", 326),
+              ("Limits", 393)),
+        _line(155, ("apalutamide", 27), ("Erleada", 209), ("Not Available", 326),
+              ("Male only", 393)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    assert [r.cells["drug"] for r in rows] == ["Caldolor"]
+
+
+def test_a_category_naming_drugs_beside_list_items_leaves_the_list_alone():
+    # Kentucky: "INFLAMMATORY DRUGS" in the category column, on a line with list items
+    page = _page(
+        _line(100, ("PDL DRUG CATEGORY", 72), ("PREFERRED", 231), ("NON-PREFERRED", 462)),
+        _line(115, ("NON-STEROIDAL ANTI-", 72), ("Celecoxib", 231), ("Arthrotec", 462)),
+        _line(124, ("INFLAMMATORY DRUGS", 72), ("Diclofenac Sodium Topical", 231),
+              ("Celebrex", 462)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    assert [(r.cells["drug"], r.list_role) for r in rows] == [
+        ("Celecoxib", "preferred"),
+        ("Arthrotec", "non_preferred"),
+        ("Diclofenac Sodium Topical", "preferred"),
+        ("Celebrex", "non_preferred"),
+    ]
+
+
+def test_column_titles_naming_the_status_or_the_drug():
+    assert layout.role("Drug / Product Name") == "drug"
+    # a bare "PREFERRED" over a list beside "NON-PREFERRED" is a list column, not a Status column
+    lay = layout.header(_line(100, ("PREFERRED", 231), ("NON-PREFERRED", 462)), 612)
+    assert lay is not None and lay.mode == "list"
+    lay = layout.header(_line(100, ("Non Preferred Drugs", 27), ("Status", 193)), 900)
+    assert lay is not None and lay.mode == "record" and lay.roles() == {"drug", "status"}

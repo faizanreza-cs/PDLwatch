@@ -18,7 +18,7 @@ from the drug dictionary later.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from rapidfuzz import fuzz, process
 
@@ -42,7 +42,8 @@ _ROLE_PATTERNS: list[tuple[str, str]] = [
     ("class", r"(therapeutic class|(.+ )?drug (class|category)|class|category|therapeutic category"
               r"|hic3 desc(ription)?|system|body system)"),
     ("code", r"(hic3|hicl|gcn|gcn seq no|gsn|ndc)"),  # a class or product code column
-    ("drug", r"(drug|drug name|medication|product|product name|agent|brand name|label name)"),
+    ("drug", r"(drug|drug name|drug ?/ ?product( name)?|medication|product|product name|agent"
+             r"|brand name|label name)"),
     ("generic", r"(generic name|generic)"),
     ("status", r"(status|pdl status|preferred status|formulary status|preferred\?"
                r"|preferred y/n|preferred|pdl)"),
@@ -56,6 +57,10 @@ _ROLE_PATTERNS: list[tuple[str, str]] = [
 ]  # fmt: skip
 _FOOTER = re.compile(r"^(page \d+( of \d+)?|\d+)$", re.I)
 _TOP, _BOTTOM = 0.085, 0.945  # page decor (title, banner, page number) lives outside this band
+# a column titled for the status ("Status"), unlike a bare "PREFERRED" over a list
+_STATUS_TITLE = re.compile(r"(pdl |preferred |formulary )?status")
+# the title of a column of drugs ("Generic Name Drugs", "Brand Name Drugs", "Drugs")
+_DRUGS_TITLE = re.compile(r"(.+ )?(drugs|medications|products)( name)?")
 
 
 # long header phrases, for headers OCR split or misspelt ("Cc overage Requirements and Limits")
@@ -159,6 +164,17 @@ def header(line: Line, width: float) -> Layout | None:
         at = [k for k, (rk, _) in enumerate(tagged) if rk == one]
         for k in at[:-1] if one == "class" else at[1:]:
             tagged[k] = ("other", tagged[k][1])
+    # "Preferred Drugs | Status | Type" (Utah): a list's title over the drug column of a table
+    # whose Status column says each drug's status
+    listed = [k for k, (rk, _) in enumerate(tagged) if rk in LIST_ROLES]
+    status = [
+        k
+        for k, (rk, p) in enumerate(tagged)
+        if rk == "status" and _STATUS_TITLE.fullmatch(" ".join(p.text.lower().split()))
+    ]
+    if len(listed) == 1 and status and listed[0] < status[0] and all(
+            rk != "drug" for rk, _ in tagged):  # fmt: skip
+        tagged[listed[0]] = ("drug", tagged[listed[0]][1])
     found = [(r, p) for r, p in tagged if r and r != "other"]
     unknown = [p for r, p in tagged if r is None and len(p.text) > 2]
     # real headers carry columns this parser doesn't use ("Brand/Generic", "Class Criteria");
@@ -418,19 +434,32 @@ def _status_value(line: Line, new: Layout, current: Layout) -> bool:
             and role(line.text) in {"preferred", "non_preferred", "status"})  # fmt: skip
 
 
-def _foreign_header(line: Line) -> bool:
+def _foreign_header(line: Line, layout: Layout | None = None) -> bool:
     """A header row of another kind of table: it starts with a drug or class column ("Drug
     Name", "Drug / Class Name") and the rest are column titles this parser has no role for
-    ("Step Therapy (ST) Parameters", "Dose Optimization Limitations")."""
-    first = line.phrases[0].text if line.phrases else ""
+    ("Step Therapy (ST) Parameters", "Dose Optimization Limitations"). Inside a record table, also
+    titles over columns of drugs, naming a column this parser knows but no status, tier or list
+    ("Generic Name Drugs | Brand Name Drugs | Updated | Limits": Utah's lists after its PDL)."""
+    if len(line.phrases) < 2:
+        return False
+    first, rest = line.phrases[0].text, line.phrases[1:]
+    titles = all(len(p.text.split()) <= 5 and p.text[:1].isupper()
+                 and match_product(p.text).product is None for p in rest)  # fmt: skip
     named = role(first) in {"drug", "class"} or bool(
         re.fullmatch(r"(drug|medication|product)( ?/ ?class)?( name)?", first.lower().strip())
     )
-    if len(line.phrases) < 2 or not named:
-        return False
-    rest = line.phrases[1:]
-    return all(role(p.text) is None and len(p.text.split()) <= 5 and p.text[:1].isupper()
-               and match_product(p.text).product is None for p in rest)  # fmt: skip
+    if named:
+        return titles and all(role(p.text) is None for p in rest)
+    roles = [role(p.text) for p in line.phrases]
+    return (
+        layout is not None
+        and layout.mode == "record"
+        and len(rest) >= 2
+        and bool(_DRUGS_TITLE.fullmatch(" ".join(first.lower().split())))
+        and any(roles[1:])
+        and not set(roles) & {"status", "tier", *LIST_ROLES}
+        and titles
+    )
 
 
 def _spanning(line: Line, layout: Layout) -> str | None:
@@ -460,9 +489,38 @@ class _State:
     drug_class: str | None = None
     rows: list[RawRow] = field(default_factory=list)
     pages: set[int] = field(default_factory=set)
+    # record tables: lines waiting for the row that starts below them, and the last line read
+    carry: list[tuple[Line, dict[str, Cell]]] = field(default_factory=list)
+    prev_top: float | None = None
+    prev_page: int | None = None
 
 
 Trace = dict[int, list[tuple[Line, "Layout | None", str]]]
+
+
+def _with_next(s: _State, page: Page, lines: list[Line], heads: list[Layout | None], i: int,
+               cells: dict[str, Cell]) -> str | None:  # fmt: skip
+    """A record table's line with no drug name that belongs with the line close below it:
+    "header", the top line of a header that wraps upward ("Last" / "Required Prior Authorization"
+    over "Non Preferred Drugs | Status"), when the header is nearer than the line above; "carry",
+    the first line of a cell centred on the row below ("30 Units / 15 Days" half above
+    "Journavx"), when that row is at most half as far as the line above. Not on scans, whose word
+    positions scatter too much to tell."""
+    line = lines[i]
+    if (page.ocr or "drug" in cells or i + 1 >= len(lines) or s.layout is None
+            or s.prev_top is None or s.prev_page != page.number):  # fmt: skip
+        return None
+    gap, above = lines[i + 1].top - line.top, line.top - s.prev_top
+    if not 0 < gap <= 1.5 * (line.bottom - line.top):
+        return None
+    if heads[i + 1] is not None:
+        return "header" if gap < above else None
+    below = _cells(lines[i + 1], s.layout)
+    if (2 * gap <= above and "drug" in below and _row_starts(below, s.layout)
+            and not cells.keys() & {"status", "tier", *LIST_ROLES}):  # fmt: skip
+        s.carry.append((line, cells))
+        return "carry"
+    return None
 
 
 def _side_by_side(line: Line) -> float | None:
@@ -554,10 +612,11 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 stop = next((k for k in range(start, len(lines)) if heads[k]), len(lines))
                 s.base, s.block = lay, len(s.rows)
                 s.layout, on_page = refit(lay, lines[start:stop], page.ocr), True
+                s.carry, s.prev_top, s.prev_page = [], line.top, page.number
                 s.pages.add(page.number)
                 note(page, line, "header")
                 continue
-            if s.layout is not None and _foreign_header(line):
+            if s.layout is not None and _foreign_header(line, s.layout):
                 # the header of a table this parser doesn't read ("Brand Name | Dose
                 # Optimization Limitations"): its rows aren't the list above
                 s.layout = s.base = None
@@ -586,11 +645,18 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 s.drug_class = heading
                 note(page, line, "class heading")
                 continue
+            record = s.layout.mode == "record"
+            with_next = _with_next(s, page, lines, heads, i, cells) if record else None
+            if with_next == "header":
+                note(page, line, "header")
+                continue
             note(page, line, "row")
-            if s.layout.mode == "record":
-                _record_line(s, page, line, cells)
-            else:
+            if not record:
                 _list_line(s, page, line, cells)
+                continue
+            if with_next is None:  # a carried line joins the row below it
+                _record_line(s, page, line, cells)
+            s.prev_top, s.prev_page = line.top, page.number
     for seen in (trace or {}).values():
         seen.sort(key=lambda t: t[0].top)  # decor lines in their place on the page
     return s.rows, s.pages
@@ -600,13 +666,28 @@ _LISTED = {"preferred": "preferred", "preferred_pa": "preferred", "non_preferred
            "not_covered": "not covered"}  # fmt: skip
 
 
+def _row_starts(cells: dict[str, Cell], layout: Layout) -> bool:
+    """Does this line of a record table start a row? Text in its status or tier cell does, or in
+    a column per status ("... | PREFERRED | NON-PREFERRED", a mark or the status written out); in
+    a table with neither, a drug name does."""
+    keys = layout.roles() & {"status", "tier"}
+    listed = [r for r in LIST_ROLES if r in cells]
+    return any(r in cells for r in keys) or bool(listed) if keys or listed else "drug" in cells
+
+
 def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> None:
     assert s.layout is not None
+    carried, s.carry = s.carry, []
+    for _, above in carried:  # a cell centred on this row: its first lines sit above it
+        for r, c in above.items():
+            old = cells.get(r)
+            cells[r] = (
+                replace(old, text=f"{c.text} {old.text}", conf=min(c.conf, old.conf)) if old else c
+            )
+    evidence = " / ".join([line.text, *(ln.text for ln, _ in carried)])
     keys = s.layout.roles() & {"status", "tier"}
-    # a table with a column per status ("... | PREFERRED | NON-PREFERRED"): text in one of them
-    # (a mark, or the status written out) says the status
     listed = [r for r in LIST_ROLES if r in cells]
-    starts = any(r in cells for r in keys) or bool(listed) if keys or listed else "drug" in cells
+    starts = _row_starts(cells, s.layout)
     reread = False
     # the row above on this page and under this header: nothing continues across either
     last = s.rows[-1] if len(s.rows) > s.block and s.rows[-1].page == page.number else None
@@ -636,7 +717,7 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
         # centred vertically put it ("ibuprofen oral tablet" / "400 mg, 600 mg, 800 | 1")
         for r, c in cells.items():
             last.cells[r] = (last.cells.get(r, "") + " " + c.text).strip()
-        last.evidence += " / " + line.text
+        last.evidence += " / " + evidence
         last.lines += 1
         return
     if starts and "drug" in cells:
@@ -648,7 +729,7 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
         if raw.get("class"):
             s.drug_class = raw["class"]
         s.rows.append(RawRow(page.number, "table", raw, s.drug_class, None, page.ocr,
-                             min(c.conf for c in cells.values()), line.text,
+                             min(c.conf for c in cells.values()), evidence,
                              frozenset(s.layout.roles()), reread=reread, y=line.top))  # fmt: skip
         return
     if last is not None:  # a wrapped cell continues the last row
@@ -656,7 +737,7 @@ def _record_line(s: _State, page: Page, line: Line, cells: dict[str, Cell]) -> N
             last.cells[r] = (last.cells.get(r, "") + " " + c.text).strip()
             if r == "class":
                 s.drug_class = last.drug_class = last.cells["class"]
-        last.evidence += " / " + line.text
+        last.evidence += " / " + evidence
         last.lines += 1
 
 

@@ -26,8 +26,13 @@ ACCEPT = 0.75  # rows at or above this confidence are accepted without review
 
 _YES = {"y", "yes", "x", "✓", "✔", "r", "required", "true", "pa", "st", "ql"}
 _NO = {"", "n", "no", "-", "–", "none", "false", "n/a"}
+# a quantity limit: "4 per 28 days", "24 mg per day", "1 tab per 30 days", "4 units /30 days",
+# "2 inhaler/30 days", "30ml/30days"
 _QUANTITY = re.compile(
-    r"\d+(\.\d+)?\s*(mg\s+)?per\s+(\d+\s+)?(days|day|weeks|week|months|month)", re.I
+    r"\d+(\.\d+)?\s*(units?|tabs?|tablets?|caps?|capsules?|ml|mg|g|grams?|inhalers?|strips?"
+    r"|patch(es)?|pens?|syringes?|doses?|fills?|kits?|vials?)?\s*(per|/)\s*(\d+\s*)?"
+    r"(days?|weeks?|months?)\b",
+    re.I,
 )
 
 

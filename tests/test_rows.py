@@ -64,6 +64,24 @@ def test_requirements_cells():
     )
 
 
+def test_quantity_limits_as_utah_writes_them():
+    plain = parse("")
+    for limit, detail in [
+        ("30 Units / 15 Days with Max 1 Fill", "30 Units / 15 Days"),
+        ("1 tab per 30 days", "1 tab per 30 days"),
+        ("Cumulative: 120 units /30 days", "120 units /30 days"),
+        ("2 inhaler/30 days", "2 inhaler/30 days"),
+        ("100u/ml: 30ml/30days", "30ml/30days"),
+        ("90 MME & 4 tablets /day", "4 tablets /day"),
+        ("24 mg per day", "24 mg per day"),
+    ]:
+        r = from_raw(_raw("Novolog", None, status="Preferred", req=limit), plain, "d", "UT")
+        assert (r.ql, r.ql_detail) == (True, detail), limit
+    for other in ("Minimum Age: 4 Years Old", "09/01/25", "Female only"):  # an age, a date
+        r = from_raw(_raw("Novolog", None, status="Preferred", req=other), plain, "d", "UT")
+        assert (r.ql, r.ql_detail) == (False, None), other
+
+
 def test_ocr_daggers_are_decoded_but_sent_to_review():
     leg = parse("* = Prior authorization. † = Quantity limit applies.")
     r = score([from_raw(_raw("Zituviot", ocr=True), leg, "d", "AL")])[0]
