@@ -45,8 +45,8 @@ workflow runs the same pipeline on real state PDLs.
 | What changed this quarter? | Consecutive PDLs compared per state | All 25 states with two versions: **95% of the 260 true changes found; 193 confirmed automatically, all correct**; the rest wait for review |
 | How fast? | 4 worker processes | All 106 PDFs, 317 pages (47 OCR'd), in 80 seconds |
 
-On real state PDLs there's no answer key, so accepted rows are checked by sampling. On 26 public
-files from 13 states (24 PDFs and Washington's weekly Excel lists), **49% of 52,110 rows were
+On real state PDLs there's no answer key, so accepted rows are checked by sampling. On 28 public
+files from 14 states (26 PDFs and Washington's weekly Excel lists), **50% of 55,936 rows were
 accepted automatically, and the status was right in all 60 accepted rows drawn at random**; the
 rest wait for review with a reason ([results](#results)).
 
@@ -235,15 +235,18 @@ the log as a line to update.
 
 ### Results
 
-From run [38713818631](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38713818631)
-(15 October 2026): **26 files from 13 states (24 PDFs with a text layer, 2,292 pages, and
-Washington's two latest weekly workbooks): 52,110 rows, 25,439 (49%) accepted automatically.**
+From run [40465844991](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40465844991)
+(27 October 2026): **28 files from 14 states (26 PDFs with a text layer, 2,523 pages, and
+Washington's two latest weekly workbooks): 55,936 rows, 27,747 (50%) accepted automatically.**
 60 accepted rows drawn at random were checked by eye against their line and column header: the
 status was right in all 60, and so were the PA and quantity limit flags printed on those lines.
 An earlier sample found one wrong row. New York
 ends its PDL with a criteria table ("Drug / Class Name | Step Therapy (ST) Parameters | ..."),
-which had been read as the list above it. Tables like it are now recognised, and New York's
-accepted rows fell from 669 to 604.
+which had been read as the list above it. Tables like it are now recognised, which took New
+York's September list from 669 accepted rows to 604. Utah gives each drug class a "Preferred
+Drugs" table and a "Non Preferred Drugs" table, each with a Status column, which had been read as
+two lists. They're now read as tables, and the accepted rows of Utah's latest list rose from 475
+to 1,149.
 
 | State | Files | Latest version | Rows | Accepted | Layout |
 |---|---|---|---|---|---|
@@ -253,27 +256,28 @@ accepted rows fell from 669 to 604.
 | Indiana | 1 | Aug 2026 | 1,202 | 686 | Bulleted lists with step therapy and quantity limit notes |
 | Kentucky | 2 | May 2024 | 3,899 | 1,963 | Three lists: preferred, preferred with PA, non-preferred |
 | Maryland | 2 | Jul 2026 | 2,229 | 1,543 | Lists with "cc" and "ql" codes |
-| New York | 1 | Sep 2026 | 1,091 | 604 | Lists with superscripts and coverage notes, then a criteria table |
+| New York | 1 | Oct 2026 | 1,088 | 599 | Lists with superscripts and coverage notes, then a criteria table |
 | Ohio | 2 | Jul 2026 | 2,434 | 1,562 | Lists with PA, ST and brand-over-generic codes |
 | Oregon | 3 | Jan 2025 | 1,996 | 916 | One preferred column (name and form), symbols defined at the foot of each page |
 | Pennsylvania | 2 | Jan 2026 | 4,590 | 2,319 | Preferred / non-preferred lists with superscript PA, QL and age codes that the text layer joins to the name ("CapsuleQL") |
+| Utah | 2 | Oct 2026 | 3,864 | 2,325 | Per drug class, a "Preferred Drugs" and a "Non Preferred Drugs" table with a Status column; headers over three lines, limits centred on their drug |
 | Vermont | 3 | Oct 2026 | 6,474 | 3,059 | Lists with criteria and quantity limit notes |
-| Washington | 2 | Oct 2026 | 8,013 | 4,631 | A weekly Excel workbook with one row per package (about 126,000), read through a source profile: the drugs on the PDL, with the pharmacy benefit's status and PA |
+| Washington | 2 | Oct 2026 | 7,978 | 4,619 | A weekly Excel workbook with one row per package (about 126,000), read through a source profile: the drugs on the PDL, with the pharmacy benefit's status and PA |
 | West Virginia | 1 | Apr 2025 | 1,925 | 1,058 | Lists with PA criteria |
 
-Comparing consecutive versions found 3,061 changes. Washington's two weekly lists differ by 39
-(3 products added, 13 removed, 23 status changes); Pennsylvania's July 2025 and January 2026
-lists by 170.
+Comparing consecutive versions found 3,522 changes. Utah's October 2024 and 2026 lists differ by
+340 products added, removed or changing status, and 159 quantity limits; Pennsylvania's July 2025
+and January 2026 lists by 170 products; Washington's two latest weekly lists by one added product.
 
 Most rows in review name something neither the dictionary nor RxNorm's prescribable list knows
 (insulin syringes and pen needles, vitamins and other over-the-counter products, abbreviations
 like "AMPICILLIN-SULB"), carry words around a known name ("bupropion XL (Forfivo XL)"), list one
 product twice with different statuses, or are notes and criteria that sit in a list column. Each
-carries its reason. Colorado, Michigan, Utah and Texas refuse automated downloads (HTTP 403),
+carries its reason. Colorado, Michigan and Texas refuse automated downloads (HTTP 403),
 Iowa's and Mississippi's servers drop the connection, and Virginia's page doesn't link its list
 in a way the downloader follows yet.
 
-Extracting all 26 files took 1 minute 55 seconds on 4 workers in this run; a run with nothing new
+Extracting all 28 files took 2 minutes 15 seconds on 4 workers in this run; a run with nothing new
 rebuilt every table from the extraction cache in 7 seconds (run
 [38641454502](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38641454502)).
 
@@ -282,8 +286,8 @@ rebuilt every table from the extraction cache in 7 seconds (run
 - **Cadence:** `pdlwatch sync` checks every source on a schedule, downloads only files that
   changed and extracts only new PDFs. When no state has posted anything new, it rebuilds every
   table from the cache in seconds (7 seconds on the [real archive](#results)).
-- **Speed:** the 26 real files (2,292 PDF pages with a text layer, and two workbooks of about
-  126,000 rows each) took 1 minute 55 seconds on a 4-vCPU runner. `pdlwatch benchmark` measures
+- **Speed:** the 28 real files (2,523 PDF pages with a text layer, and two workbooks of about
+  126,000 rows each) took 2 minutes 15 seconds on a 4-vCPU runner. `pdlwatch benchmark` measures
   any machine. On a 4-CPU machine, the synthetic corpus (317 pages, 47 of them scans that need
   OCR) took 151 seconds with 1 worker and 49 seconds with 4 (386 pages a minute); a fully cached
   run took 0.15 seconds.
@@ -331,10 +335,10 @@ in CI.
 
 ## Tests and evals
 
-**188 offline tests** cover table and list parsing on hand-built pages (including layouts
+**194 offline tests** cover table and list parsing on hand-built pages (including layouts
 copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns,
-two tables side by side), lists published as workbooks and read through source profiles,
-legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they
+two tables side by side, a Status column under each list's title), lists published as workbooks
+and read through source profiles, legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they
 measure, effective dates from titles and file names, change detection, point-in-time history and
 alerts, the RxNorm lexicon on a sample release, the
 extraction cache and the downloader against a fake server, the pipeline end to end on a small
@@ -346,11 +350,10 @@ tools and routing; `make eval-llm` scores a real model on the same questions.
 
 ## Limitations
 
-- **Real PDLs are harder than the synthetic ones.** 49% of real rows are accepted automatically
+- **Real PDLs are harder than the synthetic ones.** Half of real rows are accepted automatically
   so far; the rest wait for review ([results](#results)). Georgia's managed care formulary is
-  only partly read (a quarter of its rows accepted), Utah's list (downloaded since 26 October) isn't
-  read correctly yet, 6 of the 20 states in the sources file don't download yet, and class names in
-  list layouts come from headings rather than the class column.
+  only partly read (a quarter of its rows accepted), 6 of the 20 states in the sources file don't
+  download yet, and class names in list layouts come from headings rather than the class column.
 - **Prose needs the LLM path.** The keyword rules find every drug but get only 71% of prose
   statuses right, so all prose rows go to review. The LLM extractor is built and tested with
   fake clients, but wasn't run here (no API key in this environment).
