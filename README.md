@@ -240,13 +240,15 @@ From run [40465844991](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40
 Washington's two latest weekly workbooks): 55,936 rows, 27,747 (50%) accepted automatically.**
 60 accepted rows drawn at random were checked by eye against their line and column header: the
 status was right in all 60, and so were the PA and quantity limit flags printed on those lines.
-An earlier sample found one wrong row. New York
-ends its PDL with a criteria table ("Drug / Class Name | Step Therapy (ST) Parameters | ..."),
-which had been read as the list above it. Tables like it are now recognised, which took New
-York's September list from 669 accepted rows to 604. Utah gives each drug class a "Preferred
-Drugs" table and a "Non Preferred Drugs" table, each with a Status column, which had been read as
-two lists. They're now read as tables, and the accepted rows of Utah's latest list rose from 475
-to 1,149.
+Earlier samples found wrong rows in two layouts, both since fixed. New York ends its PDL with a
+criteria table ("Drug / Class Name | Step Therapy (ST) Parameters | ..."), which had been read as
+the list above it (one wrong row); tables like it are now recognised, which took New York's
+September list from 669 accepted rows to 604. Utah gives each drug class a "Preferred Drugs"
+table and a "Non Preferred Drugs" table, each with a Status column, which had been read as two
+lists (all 3 Utah rows in the sample of run
+[40396126732](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40396126732), on 26 October,
+were wrong); they're now read as tables, and the accepted rows of Utah's latest list rose from
+475 to 1,149.
 
 | State | Files | Latest version | Rows | Accepted | Layout |
 |---|---|---|---|---|---|
