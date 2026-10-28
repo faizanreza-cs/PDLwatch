@@ -58,7 +58,8 @@ def test_salts_forms_and_combination_order_around_a_known_name(text, product):
 
 
 def test_other_words_beside_a_known_name_still_go_to_review():
-    for text in ("omeprazole OTC", "Humalog Mix 75/25", "Trulicity Plus"):
+    # "MR" is a code in New York's list (the drug is also in another program), not a release type
+    for text in ("omeprazole OTC", "Humalog Mix 75/25", "Trulicity Plus", "omeprazole MR"):
         m = match_product(text)
         assert m.product is not None and m.score < 100, text
 

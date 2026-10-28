@@ -245,8 +245,8 @@ _DESCRIPTORS = frozenset({
     # inhaler devices
     "hfa", "ellipta", "respimat", "diskus", "aerosphere", "pressair", "handihaler", "twisthaler",
     "flexhaler", "redihaler", "digihaler", "inhub", "droperette",
-    # release types
-    "er", "xr", "dr", "xl", "sr", "ir", "odt", "la", "cr", "xt", "mr", "24h", "12h", "ec", "xr-odt",
+    # release types (not "MR": New York prints it after drugs that are also in another program)
+    "er", "xr", "dr", "xl", "sr", "ir", "odt", "la", "cr", "xt", "24h", "12h", "ec", "xr-odt",
     "release", "extended", "delayed", "immediate", "orally", "disintegrating",
 })  # fmt: skip
 # Salts written short, spelled as RxNorm names them: "labetalol HCl" is labetalol hydrochloride
