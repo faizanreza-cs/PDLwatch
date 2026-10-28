@@ -129,6 +129,16 @@ def test_garbled_text_beside_a_scanned_name_goes_to_review():
     assert r.product == "Nicotrol inhaler" and not r.accepted
 
 
+def test_two_forms_of_a_product_with_different_statuses_go_to_review():
+    leg = parse("")
+    raws = [_raw("omeprazole", "preferred"), _raw("omeprazole DR", "non_preferred"),
+            _raw("pantoprazole sodium DR", "preferred")]  # fmt: skip
+    rows = score([from_raw(r, leg, "d", "OH") for r in raws])
+    assert [r.product for r in rows] == ["omeprazole", "omeprazole", "pantoprazole"]
+    assert [r.accepted for r in rows] == [False, False, True]
+    assert "conflicting statuses in this document" in rows[1].review_reasons
+
+
 def test_a_known_name_inside_a_longer_one_goes_to_review():
     r = score([from_raw(_raw("Humalog Mix 75/25"), MARKERS, "d", "OH")])[0]
     assert r.product == "Humalog" and not r.accepted  # another product, maybe

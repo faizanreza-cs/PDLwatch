@@ -38,6 +38,31 @@ def test_unknown_names_stay_unknown():
     assert match_product("").product is None
 
 
+@pytest.mark.parametrize(
+    ("text", "product"),
+    [
+        ("omeprazole DR", "omeprazole"),  # a release type
+        ("aripiprazole ODT", "aripiprazole"),
+        ("pantoprazole sodium DR", "pantoprazole"),  # a salt, then the release type
+        ("quetiapine fumarate ER", "quetiapine"),
+        ("lurasidone HCl", "lurasidone"),  # a salt written short
+        ("naloxone/buprenorphine", "buprenorphine/naloxone"),  # not buprenorphine alone
+        ("velpatasvir/sofosbuvir", "sofosbuvir/velpatasvir"),
+        ("Nurtec ODT", "Nurtec ODT"),  # a name that carries the word is still itself
+        ("bupropion SR", "bupropion SR"),
+    ],
+)
+def test_salts_forms_and_combination_order_around_a_known_name(text, product):
+    m = match_product(text)
+    assert (m.product.name, m.score) == (product, 100.0)
+
+
+def test_other_words_beside_a_known_name_still_go_to_review():
+    for text in ("omeprazole OTC", "Humalog Mix 75/25", "Trulicity Plus"):
+        m = match_product(text)
+        assert m.product is not None and m.score < 100, text
+
+
 def test_dictionary_is_consistent():
     assert len(BY_NAME) == len(PRODUCTS)  # names are unique
     assert all(p.ingredient and p.drug_class in CLASSES for p in PRODUCTS)

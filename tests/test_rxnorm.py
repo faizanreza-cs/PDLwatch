@@ -18,10 +18,16 @@ CONSO = [
     ("907", "BN", "Oldbrand", "O"),  # obsolete: left out
     ("908", "SCD", "ticagrelor 90 MG Oral Tablet", "N"),  # a clinical drug: left out
     ("909", "BN", "Gel", "N"),  # too short to be found inside a longer cell
+    ("910", "IN", "labetalol", "N"), ("911", "PIN", "labetalol hydrochloride", "N"),
+    ("912", "IN", "lisinopril", "N"), ("913", "IN", "hydrochlorothiazide", "N"),
+    ("914", "MIN", "hydrochlorothiazide / lisinopril", "N"),
+    ("915", "BN", "Vigamox", "N"), ("916", "IN", "moxifloxacin", "N"),
+    ("917", "IN", "metoprolol", "N"), ("918", "PIN", "metoprolol succinate", "N"),
+    ("919", "PIN", "metoprolol tartrate", "N"),
 ]  # fmt: skip
 # RXCUI1|RXAUI1|STYPE1|REL|RXCUI2|RXAUI2|STYPE2|RELA|RUI|SRUI|SAB|SL|DIR|RG|SUPPRESS|CVF|
 REL = [("901", "902", "has_tradename"), ("905", "903", "tradename_of"),
-       ("905", "904", "tradename_of")]  # fmt: skip
+       ("905", "904", "tradename_of"), ("915", "916", "tradename_of")]  # fmt: skip
 
 
 @pytest.fixture
@@ -62,6 +68,21 @@ def test_names_outside_the_dictionary_are_found(lexicon):
     assert inside.product.name == "Brilinta" and inside.score < 100
     assert match_product("Hair Gel Plus").product is None  # one short word is not a match
     assert match_product("Ozempic").product.name == "Ozempic"  # the dictionary still comes first
+
+
+def test_salts_forms_and_combinations_are_read_as_rxnorm_names_them(lexicon):
+    for text, name in [
+        ("labetalol HCl", "labetalol hydrochloride"),  # the salt RxNorm keeps
+        ("LISINOPRIL/HYDROCHLOROTHIAZIDE", "hydrochlorothiazide / lisinopril"),  # RxNorm's order
+        ("Vigamox 0.5% Eye Drops", "Vigamox"),
+        ("metoprolol succ ER", "metoprolol succinate"),  # not metoprolol tartrate
+        ("Metoprolol Tartrate", "metoprolol tartrate"),
+        ("moxifloxacin hydrochloride drops", "moxifloxacin"),  # a salt RxNorm doesn't keep
+    ]:
+        m = match_product(text)
+        assert (m.product.name, m.score) == (name, 100.0), text
+    assert match_product("Vigamox Plus").score < 100  # a word it doesn't know: review
+    assert match_product("Advair HFA").product.name == "Advair HFA"  # a brand with the word
 
 
 def test_without_a_lexicon_nothing_changes(monkeypatch):

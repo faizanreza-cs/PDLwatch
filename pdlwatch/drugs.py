@@ -7,7 +7,8 @@ ingredient for analysis by molecule.
 
 Matching tolerates what PDFs and OCR do to names: trademark symbols, footnote markers, upper
 case, dosage forms, "Brand (generic)" pairs, hyphenated or slashed combinations and the odd
-misread letter.
+misread letter. It also reads salts written short ("HCl"), words for how a drug is given or
+released ("Drops", "ER") and combinations written in another order than RxNorm's.
 """
 
 from __future__ import annotations
@@ -228,6 +229,46 @@ _STRENGTH = (
 )
 _MARKERS = r"[*†‡§#^¶®™©]"
 
+# Words beside a name that say how it is given, released or packed ("Vigamox Drops", "Trelegy
+# Ellipta", "bupropion XL"). Like the words in _FORMS they don't make another product, but they are
+# read only when the name as printed isn't known, so names that carry one ("Nurtec ODT", "Advair
+# HFA") still match as they are. One document giving two forms of a product different statuses
+# sends both to review (conflicting statuses).
+_DESCRIPTORS = frozenset({
+    "cream", "creams", "drops", "drop", "gel", "gels", "patch", "patches", "spray", "sprays",
+    "nasal", "ointment", "oint", "vaginal", "eye", "ophthalmic", "ophth", "otic", "ear", "topical",
+    "foam", "lotion", "shampoo", "suppository", "suppositories", "rectal", "enema", "ring",
+    "implant", "depot", "aerosol", "nebulizer", "neb", "transdermal", "buccal", "intranasal", "iv",
+    "im", "inj", "aq", "jelly", "mist", "conc", "concentrate", "syrup", "elixir", "emulsion",
+    "liquid", "lozenge", "lozenges", "troche", "gum", "cleanser", "wash", "rinse", "paste",
+    "suspension", "suspensions", "chew", "sol", "pump", "sl",
+    # inhaler devices
+    "hfa", "ellipta", "respimat", "diskus", "aerosphere", "pressair", "handihaler", "twisthaler",
+    "flexhaler", "redihaler", "digihaler", "inhub", "droperette",
+    # release types
+    "er", "xr", "dr", "xl", "sr", "ir", "odt", "la", "cr", "xt", "mr", "24h", "12h", "ec", "xr-odt",
+    "release", "extended", "delayed", "immediate", "orally", "disintegrating",
+})  # fmt: skip
+# Salts written short, spelled as RxNorm names them: "labetalol HCl" is labetalol hydrochloride
+_SALT_SHORT = {
+    "hcl": "hydrochloride", "dihcl": "dihydrochloride", "hbr": "hydrobromide", "na": "sodium",
+    "sod": "sodium", "pot": "potassium", "mag": "magnesium", "succ": "succinate",
+    "tart": "tartrate", "mal": "maleate", "phos": "phosphate", "sulf": "sulfate", "acet": "acetate",
+    "fum": "fumarate", "mes": "mesylate", "bes": "besylate", "cit": "citrate", "hyc": "hyclate",
+}  # fmt: skip
+# Salts a name is also read without, when no product has the salt: RxNorm keeps a salt in the
+# name only where it makes another drug (metoprolol succinate and metoprolol tartrate)
+_SALTS = frozenset({
+    "hydrochloride", "dihydrochloride", "hydrobromide", "sodium", "disodium", "potassium",
+    "calcium", "magnesium", "succinate", "tartrate", "bitartrate", "maleate", "mesylate",
+    "dimesylate", "besylate", "citrate", "sulfate", "phosphate", "acetate", "diacetate", "fumarate",
+    "hemifumarate", "hyclate", "hydrate", "monohydrate", "hemihydrate", "dihydrate", "trihydrate",
+    "sesquihydrate", "bromide", "chloride", "nitrate", "lactate", "gluconate", "carbonate",
+    "valerate", "propionate", "dipropionate", "furoate", "benzoate", "pamoate", "tosylate",
+    "xinafoate", "medoxomil", "axetil", "mofetil", "decanoate", "enanthate", "cypionate",
+    "undecanoate", "palmitate", "stearate", "ethylsuccinate", "estolate",
+})  # fmt: skip
+
 # "(compare to Tresiba)", "(gen Januvia)", "(generic for Dexilant)", "biosimilar to Humira": the
 # other product is named for reference; the row is the product named before it
 _REFERENCE = re.compile(
@@ -303,6 +344,33 @@ def _names_longest_first() -> list[str]:
     return sorted(_index(), key=len, reverse=True)
 
 
+def _lookup(key: str) -> Product | None:
+    """The product a normalised name is, exactly: the dictionary's, then RxNorm's."""
+    if key in _index():
+        return _index()[key]
+    entry = rxnorm.exact([key])
+    return _from_rxnorm(entry) if entry else None
+
+
+def _plain(n: str) -> Product | None:
+    """The product a normalised name gives once the words around it are read: salts written short
+    spelled out ("labetalol HCl" is labetalol hydrochloride), words for the form or release left
+    out ("Vigamox Drops", "bupropion XL"), then the salt itself when no product has it, and a
+    combination's parts in RxNorm's order ("lisinopril/hydrochlorothiazide")."""
+    words = n.replace("/", " / ").split()
+    core = " ".join(_SALT_SHORT.get(w, w) for w in words if w not in _DESCRIPTORS)
+    core = core.replace(" / ", "/")
+    parts = [" ".join(w for w in p.split() if w not in _SALTS) for p in core.split("/")]
+    keys = [core]
+    if all(parts):
+        keys += ["/".join(parts), "/".join(sorted(parts))]
+    for key in dict.fromkeys(keys):
+        found = _lookup(key) if key.strip("/ ") else None
+        if found is not None:
+            return found
+    return None
+
+
 def match_product(text: str, drug_class: str | None = None) -> Match:
     """The product a PDL cell names, or ``Match(None, ...)`` when nothing is close enough.
 
@@ -310,9 +378,13 @@ def match_product(text: str, drug_class: str | None = None) -> Match:
        "liraglutide (Victoza)" the generic, as PDLs that list generics first mean it.
     2. The whole cell or the part in parentheses, exactly; a brand wins over a generic, so
        "semaglutide (Ozempic)" is Ozempic.
-    3. The longest known name inside the cell, outside parentheses first ("Ozempic pen
+    3. The name outside parentheses once the words around it are read: salts written short,
+       words for the form or release, a combination in another order ("labetalol HCl",
+       "Vigamox Drops", "bupropion XL", "lisinopril/hydrochlorothiazide"). Exact, so the row can
+       be accepted.
+    4. The longest known name inside the cell, outside parentheses first ("Ozempic pen
        injector", "Pradaxa (dabigatran) pellet pak").
-    4. Fuzzy, for OCR misreads: within the row's class when it is known (score 85+), otherwise
+    5. Fuzzy, for OCR misreads: within the row's class when it is known (score 85+), otherwise
        across the dictionary (92+).
 
     A product named only for reference ("sitagliptin (gen Januvia)") is never the match.
@@ -338,6 +410,10 @@ def match_product(text: str, drug_class: str | None = None) -> Match:
     rx = rxnorm.exact([normalise(c) for c in _candidates(text)])
     if rx:
         return Match(_from_rxnorm(rx), 100.0, normalise(text))
+    for o in outside:
+        plain = _plain(o) if o else None
+        if plain is not None:
+            return Match(plain, 100.0, normalise(text))
     n = normalise(text)
     if not n:
         return Match(None, 0.0, n)
