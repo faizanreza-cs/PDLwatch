@@ -46,7 +46,7 @@ workflow runs the same pipeline on real state PDLs.
 | How fast? | 4 worker processes | All 106 PDFs, 317 pages (47 OCR'd), in 80 seconds |
 
 On real state PDLs there's no answer key, so accepted rows are checked by sampling. On 28 public
-files from 14 states (26 PDFs and Washington's weekly Excel lists), **50% of 55,936 rows were
+files from 14 states (26 PDFs and Washington's weekly Excel lists), **58% of 56,014 rows were
 accepted automatically, and the status was right in all 60 accepted rows drawn at random**; the
 rest wait for review with a reason ([results](#results)).
 
@@ -87,7 +87,9 @@ names, markers on their own line, landscape pages, and scans with tilt, noise an
 3. **Read the legend.** Each document's own codes: "CC = clinical criteria required", "Tier 3 =
    non-preferred", "BvG = brand preferred over generic".
 4. **Match the drug** to the dictionary: brands, generics and combinations, with the OCR
-   confusions (rn/m, l/1, 0/o) folded and a fuzzy match within the therapeutic class.
+   confusions (rn/m, l/1, 0/o) folded and a fuzzy match within the therapeutic class. A salt
+   written short ("HCl"), a word for the form or release ("drops", "ER") and a combination in
+   another order are read the way RxNorm names them.
 5. **Apply the rules.** Non-preferred means prior authorization. A field the document doesn't
    express stays unknown instead of becoming "no".
 6. **Read the prose** with keyword rules offline, or with an LLM: structured output, every drug
@@ -235,11 +237,17 @@ the log as a line to update.
 
 ### Results
 
-From run [40465844991](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40465844991)
-(27 October 2026): **28 files from 14 states (26 PDFs with a text layer, 2,523 pages, and
-Washington's two latest weekly workbooks): 55,936 rows, 27,747 (50%) accepted automatically.**
+From run [40665497762](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40665497762)
+(28 October 2026): **28 files from 14 states (26 PDFs with a text layer, 2,523 pages, and
+Washington's two latest weekly workbooks): 56,014 rows, 32,286 (58%) accepted automatically.**
 60 accepted rows drawn at random were checked by eye against their line and column header: the
-status was right in all 60, and so were the PA and quantity limit flags printed on those lines.
+status was right in all 60, and so were the PA flags printed on those lines; one quantity limit
+written "4/fill, one fill/90 days" (Utah's Qutenza) wasn't read as one. Since 28 October a known
+name with its salt written short ("CITALOPRAM HBR"), a word for its form or release ("Lotemax
+ointment", "PROAIR DIGIHALER", "Aplenzin ER") or a combination in another order than RxNorm's is
+read as the product it names. That took the accepted share from 50% to 58%, and sent 11 rows back to
+review: another form of the same product has another status in the same document (paroxetine tablets
+and paroxetine ER in Illinois).
 Earlier samples found wrong rows in two layouts, both since fixed. New York ends its PDL with a
 criteria table ("Drug / Class Name | Step Therapy (ST) Parameters | ..."), which had been read as
 the list above it (one wrong row); tables like it are now recognised, which took New York's
@@ -252,34 +260,35 @@ were wrong); they're now read as tables, and the accepted rows of Utah's latest 
 
 | State | Files | Latest version | Rows | Accepted | Layout |
 |---|---|---|---|---|---|
-| Florida | 3 | Oct 2026 | 4,333 | 1,251 | Product table without a status column (every product listed is preferred), with a PA column |
-| Georgia | 1 | Oct 2026 | 1,503 | 389 | A managed care plan's formulary: two tables side by side, read left then right. Names and tiers over several lines still go to review |
-| Illinois | 3 | Oct 2025 | 12,421 | 5,458 | Table with centred headers at the very top of the page |
-| Indiana | 1 | Aug 2026 | 1,202 | 686 | Bulleted lists with step therapy and quantity limit notes |
-| Kentucky | 2 | May 2024 | 3,899 | 1,963 | Three lists: preferred, preferred with PA, non-preferred |
-| Maryland | 2 | Jul 2026 | 2,229 | 1,543 | Lists with "cc" and "ql" codes |
-| New York | 1 | Oct 2026 | 1,088 | 599 | Lists with superscripts and coverage notes, then a criteria table |
-| Ohio | 2 | Jul 2026 | 2,434 | 1,562 | Lists with PA, ST and brand-over-generic codes |
-| Oregon | 3 | Jan 2025 | 1,996 | 916 | One preferred column (name and form), symbols defined at the foot of each page |
-| Pennsylvania | 2 | Jan 2026 | 4,590 | 2,319 | Preferred / non-preferred lists with superscript PA, QL and age codes that the text layer joins to the name ("CapsuleQL") |
-| Utah | 2 | Oct 2026 | 3,864 | 2,325 | Per drug class, a "Preferred Drugs" and a "Non Preferred Drugs" table with a Status column; headers over three lines, limits centred on their drug |
-| Vermont | 3 | Oct 2026 | 6,474 | 3,059 | Lists with criteria and quantity limit notes |
-| Washington | 2 | Oct 2026 | 7,978 | 4,619 | A weekly Excel workbook with one row per package (about 126,000), read through a source profile: the drugs on the PDL, with the pharmacy benefit's status and PA |
-| West Virginia | 1 | Apr 2025 | 1,925 | 1,058 | Lists with PA criteria |
+| Florida | 3 | Oct 2026 | 4,385 | 1,677 | Product table without a status column (every product listed is preferred), with a PA column |
+| Georgia | 1 | Oct 2026 | 1,501 | 479 | A managed care plan's formulary: two tables side by side, read left then right. Names and tiers over several lines still go to review |
+| Illinois | 3 | Oct 2025 | 12,308 | 5,999 | Table with centred headers at the very top of the page |
+| Indiana | 1 | Aug 2026 | 1,203 | 832 | Bulleted lists with step therapy and quantity limit notes |
+| Kentucky | 2 | May 2024 | 3,897 | 2,787 | Three lists: preferred, preferred with PA, non-preferred |
+| Maryland | 2 | Jul 2026 | 2,229 | 1,722 | Lists with "cc" and "ql" codes |
+| New York | 1 | Oct 2026 | 1,088 | 677 | Lists with superscripts and coverage notes, then a criteria table |
+| Ohio | 2 | Jul 2026 | 2,439 | 1,710 | Lists with PA, ST and brand-over-generic codes |
+| Oregon | 3 | Jan 2025 | 2,023 | 1,389 | One preferred column (name and form), symbols defined at the foot of each page |
+| Pennsylvania | 2 | Jan 2026 | 4,607 | 2,908 | Preferred / non-preferred lists with superscript PA, QL and age codes that the text layer joins to the name ("CapsuleQL") |
+| Utah | 2 | Oct 2026 | 3,869 | 2,549 | Per drug class, a "Preferred Drugs" and a "Non Preferred Drugs" table with a Status column; headers over three lines, limits centred on their drug |
+| Vermont | 3 | Oct 2026 | 6,495 | 3,407 | Lists with criteria and quantity limit notes |
+| Washington | 2 | Oct 2026 | 8,046 | 5,037 | A weekly Excel workbook with one row per package (about 126,000), read through a source profile: the drugs on the PDL, with the pharmacy benefit's status and PA |
+| West Virginia | 1 | Apr 2025 | 1,924 | 1,113 | Lists with PA criteria |
 
-Comparing consecutive versions found 3,522 changes. Utah's October 2024 and 2026 lists differ by
-340 products added, removed or changing status, and 159 quantity limits; Pennsylvania's July 2025
-and January 2026 lists by 170 products; Washington's two latest weekly lists by one added product.
+Comparing consecutive versions found 3,561 changes. Utah's October 2024 and 2026 lists differ by
+345 products added, removed or changing status, and 167 quantity limits; Pennsylvania's July 2025
+and January 2026 lists by 169 products; Washington's two latest weekly lists by one added product.
 
 Most rows in review name something neither the dictionary nor RxNorm's prescribable list knows
 (insulin syringes and pen needles, vitamins and other over-the-counter products, abbreviations
-like "AMPICILLIN-SULB"), carry words around a known name ("bupropion XL (Forfivo XL)"), list one
-product twice with different statuses, or are notes and criteria that sit in a list column. Each
-carries its reason. Colorado, Michigan and Texas refuse automated downloads (HTTP 403),
+like "AMPICILLIN-SULB"), carry other words around a known name (a store brand, a page footer, a
+state's own code: "GNP FEXOFENADINE HCL 180 MG TB", "Naprelan MR"), list one product twice with
+different statuses (often two forms of it), or are notes and criteria that sit in a list column.
+Each carries its reason. Colorado, Michigan and Texas refuse automated downloads (HTTP 403),
 Iowa's and Mississippi's servers drop the connection, and Virginia's page doesn't link its list
 in a way the downloader follows yet.
 
-Extracting all 28 files took 2 minutes 15 seconds on 4 workers in this run; a run with nothing new
+Extracting all 28 files took 1 minute 44 seconds on 4 workers in this run; a run with nothing new
 rebuilt every table from the extraction cache in 7 seconds (run
 [38641454502](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38641454502)).
 
@@ -289,7 +298,7 @@ rebuilt every table from the extraction cache in 7 seconds (run
   changed and extracts only new PDFs. When no state has posted anything new, it rebuilds every
   table from the cache in seconds (7 seconds on the [real archive](#results)).
 - **Speed:** the 28 real files (2,523 PDF pages with a text layer, and two workbooks of about
-  126,000 rows each) took 2 minutes 15 seconds on a 4-vCPU runner. `pdlwatch benchmark` measures
+  126,000 rows each) took 1 minute 44 seconds on a 4-vCPU runner. `pdlwatch benchmark` measures
   any machine. On a 4-CPU machine, the synthetic corpus (317 pages, 47 of them scans that need
   OCR) took 151 seconds with 1 worker and 49 seconds with 4 (386 pages a minute); a fully cached
   run took 0.15 seconds.
@@ -337,14 +346,14 @@ in CI.
 
 ## Tests and evals
 
-**194 offline tests** cover table and list parsing on hand-built pages (including layouts
-copied from real PDLs: centred headers, bullets with notes, superscripts, titles across columns,
-two tables side by side, a Status column under each list's title), lists published as workbooks
-and read through source profiles, legends and Medicaid rules, review reasons for scans, reviewer decisions and the error rates they
-measure, effective dates from titles and file names, change detection, point-in-time history and
-alerts, the RxNorm lexicon on a sample release, the
-extraction cache and the downloader against a fake server, the pipeline end to end on a small
-corpus, the agent, SQL guard, LLM grounding checks and the API.
+**206 offline tests** cover table and list parsing on hand-built pages (including layouts copied
+from real PDLs: centred headers, bullets with notes, superscripts, titles across columns, two tables
+side by side, a Status column under each list's title), drug names with salts, forms and release
+types, lists published as workbooks and read through source profiles, legends and Medicaid rules,
+review reasons for scans, reviewer decisions and the error rates they measure, effective dates from
+titles and file names, change detection, point-in-time history and alerts, the RxNorm lexicon on a
+sample release, the extraction cache and the downloader against a fake server, the pipeline end to
+end on a small corpus, the agent, SQL guard, LLM grounding checks and the API.
 
 **Agent eval** (`make eval`): 21 golden questions with the expected tool and the facts each answer
 must contain, read from the data at eval time. The offline mock passes 21/21, which checks the
@@ -352,9 +361,9 @@ tools and routing; `make eval-llm` scores a real model on the same questions.
 
 ## Limitations
 
-- **Real PDLs are harder than the synthetic ones.** Half of real rows are accepted automatically
+- **Real PDLs are harder than the synthetic ones.** 58% of real rows are accepted automatically
   so far; the rest wait for review ([results](#results)). Georgia's managed care formulary is
-  only partly read (a quarter of its rows accepted), 6 of the 20 states in the sources file don't
+  only partly read (a third of its rows accepted), 6 of the 20 states in the sources file don't
   download yet, and class names in list layouts come from headings rather than the class column.
 - **Prose needs the LLM path.** The keyword rules find every drug but get only 71% of prose
   statuses right, so all prose rows go to review. The LLM extractor is built and tested with
