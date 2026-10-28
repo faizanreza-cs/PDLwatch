@@ -3,17 +3,20 @@ every quarter ("did our brand lose preferred status anywhere?").
 
 Rows are compared by product between consecutive PDL documents of the same state (ordered by
 effective date): status changes, products added or removed, and quantity limits added, removed
-or changed. A change that rests on a row still awaiting review is marked as such.
+or changed. A limit is compared by the amounts it names, so one typed another way, or with other
+words beside it, is the same limit. A change that rests on a row still awaiting review is marked
+as such.
 """
 
 from __future__ import annotations
 
+import re
 from functools import partial
 from typing import Any
 
 import pandas as pd
 
-from pdlwatch.extract.rows import ACCEPT
+from pdlwatch.extract.rows import ACCEPT, amounts
 from pdlwatch.history import pdl_versions
 
 SCANNED_CAP = 0.6  # changes against a scanned version always get a look
@@ -32,6 +35,21 @@ def _ql(r: pd.Series) -> str | None:
     if not r["ql"]:
         return "none"
     return "yes" if _missing(r["ql_detail"]) else str(r["ql_detail"])
+
+
+def _said(ql: str) -> str | tuple[str, ...]:
+    """What a quantity limit says, to compare two versions by: the amounts it names, whatever words
+    the line picked up beside them ("QTY Limit: 1 tab/day" and "QTY LIMIT : 1 tablet per day
+    treatment failure to..." say the same), or else its words without the label, case or
+    spacing."""
+    if ql in {"none", "yes"}:
+        return ql
+    found = amounts(ql)
+    if found:
+        return tuple(sorted(found))
+    words = re.sub(r"^\s*(qty|quantity)\s*limits?\s*:?\s*", "", ql.lower())
+    words = re.sub(r"\s*([:,;=/])\s*", r"\1", words)
+    return " ".join(words.split()).strip(" .;,")
 
 
 def _record(out: list[dict[str, Any]], pair: dict[str, Any], cap: float, product: str,
@@ -70,7 +88,7 @@ def detect(rows: pd.DataFrame, docs: pd.DataFrame) -> pd.DataFrame:
                     if readable and x["status"] != y["status"]:
                         add(p, "status", x["status"], y["status"], conf, y["drug_class"])
                     qa, qb = _ql(x), _ql(y)
-                    if qa is not None and qb is not None and qa != qb:
+                    if qa is not None and qb is not None and _said(qa) != _said(qb):
                         add(p, "ql", None if qa == "none" else qa, None if qb == "none" else qb,
                             conf, y["drug_class"])  # fmt: skip
     return pd.DataFrame(out, columns=COLUMNS)

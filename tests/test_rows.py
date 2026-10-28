@@ -1,6 +1,6 @@
 from pdlwatch.extract.layout import RawRow
 from pdlwatch.extract.legend import parse
-from pdlwatch.extract.rows import from_raw, score, strip_markers
+from pdlwatch.extract.rows import amounts, from_raw, score, strip_markers
 
 MARKERS = parse(
     "CC = Prior authorization required (clinical criteria). QL = Quantity limit "
@@ -80,6 +80,13 @@ def test_quantity_limits_as_utah_writes_them():
     for other in ("Minimum Age: 4 Years Old", "09/01/25", "Female only"):  # an age, a date
         r = from_raw(_raw("Novolog", None, status="Preferred", req=other), plain, "d", "UT")
         assert (r.ql, r.ql_detail) == (False, None), other
+
+
+def test_amounts_are_spelled_one_way():
+    assert amounts("QTY LIMIT: 1 tablet per day") == amounts("1 tab/day") == ["1tab/day"]
+    assert amounts("120 caps per 30 days; 4 units /30 days") == ["120cap/30day", "4unit/30day"]
+    assert amounts("60ml per 30 days") == amounts("60ml/30days") == ["60ml/30day"]
+    assert amounts("Maximum 1-month supply per fill") == []
 
 
 def test_ocr_daggers_are_decoded_but_sent_to_review():

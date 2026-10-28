@@ -41,6 +41,36 @@ def test_status_additions_removals_and_limits():
     assert got == {("B", "status"), ("C", "ql"), ("D", "added")}
 
 
+def test_a_limit_is_compared_by_what_it_says():
+    """Vermont typed "QTY LIMIT" one year and "QTY Limit" the next, and its notes pick up words
+    from the criteria beside them: neither is a change. Another amount is."""
+    before = {
+        "A": "QTY LIMIT : 1 patch/day",
+        "B": "QTY LIMIT: 2 tablets/day three preferred drugs AND dosing does not exc",
+        "C": "60ml per 30 days",
+        "D": "1 tab/day",
+        "E": "1 inhaler/30 days",
+        "F": "Maximum 1-month supply per fill",
+        "G": "Maximum 1-month supply per fill",
+    }
+    after = {
+        "A": "QTY Limit: 1 patch/day",
+        "B": "QTY Limit: 2 tablets/day Maximum 30-day supply per fill",
+        "C": "60ml/30 days",
+        "D": "1 tablet per day",
+        "E": "3 inhalers/30 days",
+        "F": "maximum 1-month  supply per fill",
+        "G": "Maximum 2-month supply per fill",
+    }
+    rows = pd.DataFrame(
+        _rows("X-1", **{p: ("preferred", True, d) for p, d in before.items()})
+        + _rows("X-2", **{p: ("preferred", True, d) for p, d in after.items()})
+    )
+    got = detect(rows, DOCS)
+    assert got["product"].tolist() == ["E", "G"]
+    assert got.iloc[0][["before", "after"]].tolist() == ["1 inhaler/30 days", "3 inhalers/30 days"]
+
+
 def test_an_unreadable_status_is_not_a_change():
     rows = pd.DataFrame(_rows("X-1", A=("preferred", False, None))
                         + _rows("X-2", A=(None, False, None)))  # fmt: skip

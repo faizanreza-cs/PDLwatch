@@ -34,6 +34,28 @@ _QUANTITY = re.compile(
     r"(days?|weeks?|months?)\b",
     re.I,
 )
+# one spelling per unit and period, so "1 tablet per day" and "1 tab/day" are the same amount
+_SPELLING = [(re.compile(p), word) for p, word in [
+    (r"tablets?|tabs?", "tab"), (r"capsules?|caps?", "cap"), (r"units?", "unit"),
+    (r"inhalers?", "inhaler"), (r"strips?", "strip"), (r"patch(es)?", "patch"), (r"pens?", "pen"),
+    (r"syringes?", "syringe"), (r"doses?", "dose"), (r"fills?", "fill"), (r"kits?", "kit"),
+    (r"vials?", "vial"), (r"grams?", "g"), (r"days?", "day"), (r"weeks?", "week"),
+    (r"months?", "month"),
+]]  # fmt: skip
+
+
+def _one_spelling(m: re.Match[str]) -> str:
+    return next((word for p, word in _SPELLING if p.fullmatch(m.group(0))), m.group(0))
+
+
+def amounts(text: str) -> list[str]:
+    """The quantity limit amounts a text names, in order and each spelled one way: "1 tablet per
+    day" and "1 tab/day" are both "1tab/day"."""
+    out = []
+    for m in _QUANTITY.finditer(text):
+        amount = re.sub(r"\s*(?:\bper\b|/)\s*", "/", m.group(0).lower())
+        out.append(re.sub(r"[a-z]+", _one_spelling, re.sub(r"\s+", "", amount)))
+    return out
 
 
 @dataclass
