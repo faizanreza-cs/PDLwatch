@@ -237,7 +237,7 @@ the log as a line to update.
 
 ### Results
 
-From run [40665497762](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40665497762)
+From run [40728556275](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40728556275)
 (28 October 2026): **28 files from 14 states (26 PDFs with a text layer, 2,523 pages, and
 Washington's two latest weekly workbooks): 56,014 rows, 32,286 (58%) accepted automatically.**
 60 accepted rows drawn at random were checked by eye against their line and column header: the
@@ -275,9 +275,11 @@ were wrong); they're now read as tables, and the accepted rows of Utah's latest 
 | Washington | 2 | Oct 2026 | 8,046 | 5,037 | A weekly Excel workbook with one row per package (about 126,000), read through a source profile: the drugs on the PDL, with the pharmacy benefit's status and PA |
 | West Virginia | 1 | Apr 2025 | 1,924 | 1,113 | Lists with PA criteria |
 
-Comparing consecutive versions found 3,561 changes. Utah's October 2024 and 2026 lists differ by
-345 products added, removed or changing status, and 167 quantity limits; Pennsylvania's July 2025
+Comparing consecutive versions found 3,392 changes. Utah's October 2024 and 2026 lists differ by
+345 products added, removed or changing status, and 163 quantity limits; Pennsylvania's July 2025
 and January 2026 lists by 169 products; Washington's two latest weekly lists by one added product.
+A quantity limit is compared by the amounts it names, so one typed another way ("QTY LIMIT:" one
+year, "QTY Limit:" the next) or with other words beside it is not a change.
 
 Most rows in review name something neither the dictionary nor RxNorm's prescribable list knows
 (insulin syringes and pen needles, vitamins and other over-the-counter products, abbreviations
@@ -288,8 +290,10 @@ Each carries its reason. Colorado, Michigan and Texas refuse automated downloads
 Iowa's and Mississippi's servers drop the connection, and Virginia's page doesn't link its list
 in a way the downloader follows yet.
 
-Extracting all 28 files took 1 minute 44 seconds on 4 workers in this run; a run with nothing new
-rebuilt every table from the extraction cache in 7 seconds (run
+Extracting all 28 files took 3 minutes 15 seconds on 4 workers in this run, and 1 minute 44 seconds
+for the same work earlier that day (run
+[40665497762](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40665497762)): shared runners
+vary. A run with nothing new rebuilt every table from the extraction cache in 7 seconds (run
 [38641454502](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38641454502)).
 
 ## Run it as a service
@@ -298,10 +302,10 @@ rebuilt every table from the extraction cache in 7 seconds (run
   changed and extracts only new PDFs. When no state has posted anything new, it rebuilds every
   table from the cache in seconds (7 seconds on the [real archive](#results)).
 - **Speed:** the 28 real files (2,523 PDF pages with a text layer, and two workbooks of about
-  126,000 rows each) took 1 minute 44 seconds on a 4-vCPU runner. `pdlwatch benchmark` measures
-  any machine. On a 4-CPU machine, the synthetic corpus (317 pages, 47 of them scans that need
-  OCR) took 151 seconds with 1 worker and 49 seconds with 4 (386 pages a minute); a fully cached
-  run took 0.15 seconds.
+  126,000 rows each) took between 1 minute 44 seconds and 3 minutes 15 seconds on a 4-vCPU runner.
+  `pdlwatch benchmark` measures any machine. On a 4-CPU machine, the synthetic corpus (317 pages,
+  47 of them scans that need OCR) took 151 seconds with 1 worker and 49 seconds with 4 (386 pages
+  a minute); a fully cached run took 0.15 seconds.
 - **Onboarding a source:** one line in [`sources/medicaid_pdls.yaml`](sources/medicaid_pdls.yaml)
   (a file's address, or a page and the pattern its links match). A spreadsheet the parser can't
   read as filed gets a profile: the columns to read and the rows to keep. `pdlwatch inspect`
