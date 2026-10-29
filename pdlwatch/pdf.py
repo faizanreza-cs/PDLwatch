@@ -3,7 +3,8 @@
 Every extractor works on the same structure, so a scanned page (OCR word boxes) goes through
 the same layout parsing as a digital one:
 
-* **word**: text with its box (PDF points, origin top left), bold flag and OCR confidence;
+* **word**: text with its box (PDF points, origin top left), bold flag and OCR confidence; a
+  small icon set just before a word starts its box;
 * **line**: words that share a baseline, left to right;
 * **phrase**: words on a line separated by ordinary spaces. A wider gap starts a new phrase,
   which is how table cells and side-by-side columns separate.
@@ -142,6 +143,25 @@ def _lines(words: list[Word]) -> list[Line]:
     return out
 
 
+ICON = (6.0, 20.0)  # pt: how wide an image marking the word after it is (Vermont's: 11)
+
+
+def _icons(words: list[Word], images: list[dict[str, Any]]) -> None:
+    """A small image set just before a word is where the word starts. Vermont marks new drugs
+    with an icon before the name, which otherwise starts 13 pt right of the names under it and
+    reads as the wrapped end of the line above. An image over a word, or a speck, moves
+    nothing."""
+    for im in images:
+        if not ICON[0] <= im["x1"] - im["x0"] <= ICON[1] or im["bottom"] - im["top"] > ICON[1]:
+            continue
+        beside = [w for w in words if min(w.bottom, im["bottom"]) - max(w.top, im["top"]) > 2]
+        if any(w.x0 < im["x1"] and w.x1 > im["x0"] for w in beside):
+            continue
+        after = [w for w in beside if -1 <= w.x0 - im["x1"] <= 4]
+        if after:
+            min(after, key=lambda w: w.x0).x0 = im["x0"]
+
+
 def deskew(image: Any) -> Any:
     """Straighten a scanned page: the angle whose horizontal ink profile is sharpest.
 
@@ -223,6 +243,7 @@ def load(path: str | Path, ocr: bool = True,
                 raw = pg.extract_words(x_tolerance=1.5, y_tolerance=2.5, extra_attrs=["fontname"])
                 words = [Word(w["text"], w["x0"], w["x1"], w["top"], w["bottom"],
                               "bold" in w["fontname"].lower()) for w in raw]  # fmt: skip
+                _icons(words, pg.images)
                 pages.append(Page(n, pg.width, pg.height, _lines(words), False))
             elif ocr:
                 # deskewed but otherwise untouched: binarising (Otsu) or median-filtering first

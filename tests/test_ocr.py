@@ -26,6 +26,25 @@ def test_deskew_straightens_a_tilted_scan():
     assert pdf.deskew(page) is page  # a straight page is left alone
 
 
+def test_an_icon_before_a_name_is_where_the_name_starts(tmp_path):
+    """Vermont marks a new drug with a small image before its name: the name then starts at
+    the image, in line with the names under it. An image over a word moves nothing."""
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    path = tmp_path / "icons.pdf"
+    c = canvas.Canvas(str(path), pagesize=(612, 792))
+    c.drawString(78, 692, "Mounjaro (tirzepatide)")
+    c.drawImage(ImageReader(Image.new("RGB", (11, 13), "red")), 79, 662, 11, 13)
+    c.drawString(91, 664, "Ozempic (semaglutide) auto-injector pen")
+    c.drawString(78, 632, "Agents: Proton Pump Inhibitors")
+    c.drawImage(ImageReader(Image.new("RGB", (8, 10), "red")), 112, 630, 8, 10)
+    c.save()
+    words = {w.text: w for line in pdf.load(path)[0].lines for p in line.phrases for w in p.words}
+    assert round(words["Ozempic"].x0) == 79
+    assert words["Proton"].x0 > words["Agents:"].x1  # the image sits on "Agents:"
+
+
 def test_scanned_page_without_ocr_is_skipped_with_a_warning(tmp_path, monkeypatch):
     path = tmp_path / "scan.pdf"
     _text_like_page().convert("RGB").save(path)  # an image only PDF: no text layer

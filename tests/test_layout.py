@@ -205,6 +205,58 @@ def test_a_quantity_limit_note_that_wraps_stays_with_its_drug():
     assert rows[0].cells["ql"].endswith("days, then 120 mg monthly")
 
 
+def test_a_criteria_column_titled_on_the_line_below_the_header():
+    """Vermont 2024: "PA CRITERIA" sits on the line under the list titles, beside their notes in
+    parentheses. Its text is criteria, neither drugs nor the limits beside it."""
+    page = _page(
+        _line(100, ("PREFERRED AGENTS", 38), ("NON-PREFERRED AGENTS", 243)),
+        _line(113, ("(No PA required unless otherwise noted)", 38), ("(PA required)", 243),
+              ("PA CRITERIA", 459)),
+        _line(130, ("BUDESONIDE", 38), ("Beconase AQ", 243),
+              ("Beconase AQ, Flunisolide: The patient", 459)),
+        _line(142, ("QTY LIMIT: 1 inhaler (8.43 ml)/30 days", 50),
+              ("QTY LIMIT: 2 inhalers (50 gm)/30 days", 255),
+              ("has had a documented side effect, allergy, or treatment failure of two", 472)),
+        _line(154, ("Flunisolide 25 mcg/spray", 243),
+              ("preferred nasal glucocorticoids. If a product has an AB rated generic,", 472)),
+    )  # fmt: skip
+    rows, _ = layout.parse([page])
+    assert [r.cells["drug"] for r in rows] == [
+        "BUDESONIDE",
+        "Beconase AQ",
+        "Flunisolide 25 mcg/spray",
+    ]
+    assert [r.cells.get("ql") for r in rows] == [
+        "QTY LIMIT: 1 inhaler (8.43 ml)/30 days",
+        "QTY LIMIT: 2 inhalers (50 gm)/30 days",
+        None,
+    ]
+
+
+def test_criteria_printed_under_a_list_are_not_its_drugs_or_limits():
+    """Vermont 2026: each class prints a "PA Criteria" title and paragraphs under its table,
+    further left than the drugs. They end the list: a limit note keeps to its drug, and the
+    paragraphs don't move where the list's items start (from there, a note running past the
+    column edge would read as a class title)."""
+    page = _page(
+        _line(100, ("Preferred Agents", 78), ("Non-Preferred Agents", 320)),
+        _line(117, ("Dupixent", 78)),
+        _line(134, ("QTY Limit: 4 syringes/pens the first 28 days thereafter", 78)),
+        _line(151, ("Ebglyss", 78)),
+        _line(168, ("QTY Limit: 2 syringes/28 days", 78)),
+        _line(192, ("PA Criteria", 72)),
+        _line(209, ("Dupixent, Ebglyss: The patient has had a side effect or allergy", 72)),
+        _line(226, ("to two preferred topical agents. If a product has an AB rated generic,", 72)),
+        _line(243, ("one trial must be the generic.", 72)),
+    )
+    rows, _ = layout.parse([page])
+    assert [r.cells["drug"] for r in rows] == ["Dupixent", "Ebglyss"]
+    assert [r.cells.get("ql") for r in rows] == [
+        "QTY Limit: 4 syringes/pens the first 28 days thereafter",
+        "QTY Limit: 2 syringes/28 days",
+    ]
+
+
 def test_an_unclosed_parenthesis_does_not_swallow_the_page():
     lines = [_line(100, ("PREFERRED AGENTS", 50), ("NON-PREFERRED AGENTS", 300)),
              _line(115, ("Nicotrol (nicotine", 50))]  # fmt: skip

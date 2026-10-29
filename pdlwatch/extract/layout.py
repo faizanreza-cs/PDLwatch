@@ -9,7 +9,8 @@ OCR word boxes, with or without ruling lines.
   when the status or tier cell has text; a line without one continues the row above (wrapped
   cells).
 * **list mode** (preferred / non-preferred / not covered): every line is one drug per list
-  column; the column says the status.
+  column; the column says the status. A list ends at the next header, or at the title of the
+  criteria printed under it ("PA Criteria").
 
 Class headings come from a class column, from a bold or class-named line, or, failing both,
 from the drug dictionary later.
@@ -270,11 +271,15 @@ def refit(lay: Layout, below: list[Line], ocr: bool = False) -> Layout:
     return Layout(lay.mode, cols, lay.width)
 
 
-def merge_lines(first: Line, second: Line) -> Line:
+def merge_lines(first: Line, second: Line, titled: bool = False) -> Line:
     """A header whose cells wrap onto a second line ("PA" / "Required", "Step T" / "herapy").
 
     Each phrase of the second line joins the first-line phrase whose column it falls in; a
     continuation that starts in lower case was split mid-word, so it joins without a space.
+    When the first line is a header by itself (``titled``), a note in parentheses under a
+    title ("(PA required)") isn't part of it, and a column title set past its end is a column
+    of its own ("PREFERRED AGENTS | NON-PREFERRED AGENTS" over "(No PA required ...) | (PA
+    required) | PA CRITERIA": Vermont). Below anything else, a "Non-PDL" is a cell, not a title.
     """
     starts = [p.x0 for p in first.phrases]
     joined = [list(p.words) for p in first.phrases]
@@ -282,6 +287,12 @@ def merge_lines(first: Line, second: Line) -> Line:
         i = max((k for k, x in enumerate(starts) if x - 4 <= ph.x0), default=None)
         if i is None:
             return first
+        text = ph.text.strip()
+        if titled and text.startswith("(") and text.endswith(")"):
+            continue
+        if titled and i == len(starts) - 1 and ph.x0 > first.phrases[-1].x1 + 12 and role(text):
+            joined.append(list(ph.words))
+            continue
         words = list(ph.words)
         if words[0].text[:1].islower() and joined[i][-1].text[-1:].isalpha():
             last = joined[i][-1]
@@ -462,6 +473,30 @@ def _foreign_header(line: Line, layout: Layout | None = None) -> bool:
     )
 
 
+# the title of the criteria a list's class prints under it ("PA Criteria", "Clinical Criteria:")
+_CRITERIA_TITLE = re.compile(r"(pa|clinical) criteria\b", re.I)
+
+
+def _criteria_title(line: Line, layout: Layout | None) -> bool:
+    """A line of its own, left of a list's columns, titling the criteria printed under the list
+    (Vermont): what follows is criteria, neither drugs nor their notes, until the next header."""
+    return (
+        layout is not None
+        and layout.mode == "list"
+        and len(line.phrases) == 1
+        and bool(_CRITERIA_TITLE.match(line.text.strip()))
+        and line.x0 < min(c.hx0 for c in layout.columns) - 2
+    )
+
+
+def _table_end(lines: list[Line], heads: list[Layout | None], start: int,
+               layout: Layout | None) -> int:  # fmt: skip
+    """Where a table's lines stop on a page: at the next header, or at the title of the criteria
+    printed under a list, whose paragraphs would otherwise move where the list's items start."""
+    return next((k for k in range(start, len(lines))
+                 if heads[k] or _criteria_title(lines[k], layout)), len(lines))  # fmt: skip
+
+
 def _spanning(line: Line, layout: Layout) -> str | None:
     """A title set across list columns ("Antipsychotics – Second Generation" centred over
     the page) is a class heading, not an item: no list item crosses into the next column."""
@@ -584,7 +619,7 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
         on_page = False
         skip_next = False
         if s.base is not None:  # the last header's layout, fitted to this page's own lines
-            first = next((k for k, h in enumerate(heads) if h), len(lines))
+            first = _table_end(lines, heads, 0, s.base)
             s.layout = refit(s.base, lines[:first], page.ocr)
         for i, line in enumerate(lines):
             if skip_next:
@@ -598,7 +633,7 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
             if i + 1 < len(lines) and line.bottom + 6 > lines[i + 1].top:
                 # a header whose cells wrap: the two lines together name more columns, or tell
                 # two apart ("PREFERRED" / "PREFERRED" + "WITH PA" below it)
-                merged = header(merge_lines(line, lines[i + 1]), page.width)
+                merged = header(merge_lines(line, lines[i + 1], lay is not None), page.width)
                 if merged is not None and (lay is None or _rank(merged) > _rank(lay)):
                     lay, skip_next = merged, True
             if lay is not None and s.layout is not None and _status_value(line, lay, s.layout):
@@ -609,7 +644,7 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 if lay.mode == "list" and lay.roles() & {"preferred", "non_preferred"}:
                     s.last_list = lay  # a NOT COVERED block isn't a template for the next class
                 start = i + (2 if skip_next else 1)
-                stop = next((k for k in range(start, len(lines)) if heads[k]), len(lines))
+                stop = _table_end(lines, heads, start, lay)
                 s.base, s.block = lay, len(s.rows)
                 s.layout, on_page = refit(lay, lines[start:stop], page.ocr), True
                 s.carry, s.prev_top, s.prev_page = [], line.top, page.number
@@ -621,6 +656,10 @@ def parse(pages: list[Page], trace: Trace | None = None) -> tuple[list[RawRow], 
                 # Optimization Limitations"): its rows aren't the list above
                 s.layout = s.base = None
                 note(page, line, "other table")
+                continue
+            if _criteria_title(line, s.layout):  # the criteria under the list: the list ends
+                s.layout = s.base = None
+                note(page, line, "criteria")
                 continue
             if s.layout is None:  # before the first table: title, legend, notes
                 note(page, line, "before the first header")
