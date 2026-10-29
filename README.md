@@ -46,7 +46,7 @@ workflow runs the same pipeline on real state PDLs.
 | How fast? | 4 worker processes | All 106 PDFs, 317 pages (47 OCR'd), in 80 seconds |
 
 On real state PDLs there's no answer key, so accepted rows are checked by sampling. On 28 public
-files from 14 states (26 PDFs and Washington's weekly Excel lists), **58% of 56,014 rows were
+files from 14 states (26 PDFs and Washington's weekly Excel lists), **59% of 55,836 rows were
 accepted automatically, and the status was right in all 60 accepted rows drawn at random**; the
 rest wait for review with a reason ([results](#results)).
 
@@ -237,17 +237,21 @@ the log as a line to update.
 
 ### Results
 
-From run [40728556275](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40728556275)
-(28 October 2026): **28 files from 14 states (26 PDFs with a text layer, 2,523 pages, and
-Washington's two latest weekly workbooks): 56,014 rows, 32,286 (58%) accepted automatically.**
-60 accepted rows drawn at random were checked by eye against their line and column header: the
-status was right in all 60, and so were the PA flags printed on those lines; one quantity limit
-written "4/fill, one fill/90 days" (Utah's Qutenza) wasn't read as one. Since 28 October a known
-name with its salt written short ("CITALOPRAM HBR"), a word for its form or release ("Lotemax
-ointment", "PROAIR DIGIHALER", "Aplenzin ER") or a combination in another order than RxNorm's is
-read as the product it names. That took the accepted share from 50% to 58%, and sent 11 rows back to
-review: another form of the same product has another status in the same document (paroxetine tablets
-and paroxetine ER in Illinois).
+From run [40902103639](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40902103639)
+(29 October 2026): **28 files from 14 states (26 PDFs with a text layer, 2,523 pages, and
+Washington's two latest weekly workbooks): 55,836 rows, 32,993 (59%) accepted automatically.** 60
+accepted rows drawn at random were checked by eye against their line and column header: the status
+was right in all 60, and so were the PA and quantity limit flags printed on those lines. Since 28
+October a known name with its salt written short ("CITALOPRAM HBR"), a word for its form or release
+("Lotemax ointment", "PROAIR DIGIHALER", "Aplenzin ER") or a combination in another order than
+RxNorm's is read as the product it names. That took the accepted share from 50% to 58%, and sent 11
+rows back to review: another form of the same product has another status in the same document
+(paroxetine tablets and paroxetine ER in Illinois). Since 29 October Vermont's prior authorization
+criteria are read apart from its lists: a criteria column titled on the line under the list titles
+(April 2024), and criteria printed under each table (2026). They had run on into the quantity limit
+notes and hidden drugs, as had the icon Vermont sets before a new drug, which joined it to the line
+above. Vermont's accepted rows rose from 3,407 to 4,114, its quantity limit changes fell from 112 to
+63, and its August and October 2026 lists now differ by 68 changes instead of 163.
 Earlier samples found wrong rows in two layouts, both since fixed. New York ends its PDL with a
 criteria table ("Drug / Class Name | Step Therapy (ST) Parameters | ..."), which had been read as
 the list above it (one wrong row); tables like it are now recognised, which took New York's
@@ -271,11 +275,11 @@ were wrong); they're now read as tables, and the accepted rows of Utah's latest 
 | Oregon | 3 | Jan 2025 | 2,023 | 1,389 | One preferred column (name and form), symbols defined at the foot of each page |
 | Pennsylvania | 2 | Jan 2026 | 4,607 | 2,908 | Preferred / non-preferred lists with superscript PA, QL and age codes that the text layer joins to the name ("CapsuleQL") |
 | Utah | 2 | Oct 2026 | 3,869 | 2,549 | Per drug class, a "Preferred Drugs" and a "Non Preferred Drugs" table with a Status column; headers over three lines, limits centred on their drug |
-| Vermont | 3 | Oct 2026 | 6,495 | 3,407 | Lists with criteria and quantity limit notes |
+| Vermont | 3 | Oct 2026 | 6,317 | 4,114 | Lists with quantity limit notes; prior authorization criteria beside them (a column titled on the line under the header, 2024) or under each table (2026); an icon before new drugs |
 | Washington | 2 | Oct 2026 | 8,046 | 5,037 | A weekly Excel workbook with one row per package (about 126,000), read through a source profile: the drugs on the PDL, with the pharmacy benefit's status and PA |
 | West Virginia | 1 | Apr 2025 | 1,924 | 1,113 | Lists with PA criteria |
 
-Comparing consecutive versions found 3,392 changes. Utah's October 2024 and 2026 lists differ by
+Comparing consecutive versions found 2,864 changes. Utah's October 2024 and 2026 lists differ by
 345 products added, removed or changing status, and 163 quantity limits; Pennsylvania's July 2025
 and January 2026 lists by 169 products; Washington's two latest weekly lists by one added product.
 A quantity limit is compared by the amounts it names, so one typed another way ("QTY LIMIT:" one
@@ -290,8 +294,8 @@ Each carries its reason. Colorado, Michigan and Texas refuse automated downloads
 Iowa's and Mississippi's servers drop the connection, and Virginia's page doesn't link its list
 in a way the downloader follows yet.
 
-Extracting all 28 files took 3 minutes 15 seconds on 4 workers in this run, and 1 minute 44 seconds
-for the same work earlier that day (run
+Extracting all 28 files took 3 minutes 11 seconds on 4 workers in this run, and 1 minute 44 seconds
+for the same work on 28 October (run
 [40665497762](https://github.com/faizanreza-cs/PDLwatch/actions/runs/40665497762)): shared runners
 vary. A run with nothing new rebuilt every table from the extraction cache in 7 seconds (run
 [38641454502](https://github.com/faizanreza-cs/PDLwatch/actions/runs/38641454502)).
@@ -350,14 +354,15 @@ in CI.
 
 ## Tests and evals
 
-**206 offline tests** cover table and list parsing on hand-built pages (including layouts copied
+**211 offline tests** cover table and list parsing on hand-built pages (including layouts copied
 from real PDLs: centred headers, bullets with notes, superscripts, titles across columns, two tables
-side by side, a Status column under each list's title), drug names with salts, forms and release
-types, lists published as workbooks and read through source profiles, legends and Medicaid rules,
-review reasons for scans, reviewer decisions and the error rates they measure, effective dates from
-titles and file names, change detection, point-in-time history and alerts, the RxNorm lexicon on a
-sample release, the extraction cache and the downloader against a fake server, the pipeline end to
-end on a small corpus, the agent, SQL guard, LLM grounding checks and the API.
+side by side, a Status column under each list's title, criteria beside or under a list, an icon
+before a name), drug names with salts, forms and release types, lists published as workbooks and
+read through source profiles, legends and Medicaid rules, review reasons for scans, reviewer
+decisions and the error rates they measure, effective dates from titles and file names, change
+detection, point-in-time history and alerts, the RxNorm lexicon on a sample release, the extraction
+cache and the downloader against a fake server, the pipeline end to end on a small corpus, the
+agent, SQL guard, LLM grounding checks and the API.
 
 **Agent eval** (`make eval`): 21 golden questions with the expected tool and the facts each answer
 must contain, read from the data at eval time. The offline mock passes 21/21, which checks the
@@ -365,7 +370,7 @@ tools and routing; `make eval-llm` scores a real model on the same questions.
 
 ## Limitations
 
-- **Real PDLs are harder than the synthetic ones.** 58% of real rows are accepted automatically
+- **Real PDLs are harder than the synthetic ones.** 59% of real rows are accepted automatically
   so far; the rest wait for review ([results](#results)). Georgia's managed care formulary is
   only partly read (a third of its rows accepted), 6 of the 20 states in the sources file don't
   download yet, and class names in list layouts come from headings rather than the class column.
