@@ -10,6 +10,7 @@
 [![CI](https://github.com/faizanreza-cs/pdlwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/faizanreza-cs/pdlwatch/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
+[![Website](https://img.shields.io/badge/Website-Visit-2463B8)](https://faizanreza-cs.github.io/PDLwatch/)
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2)](https://www.linkedin.com/in/faizanreza)
 [![X](https://img.shields.io/badge/Follow-000000?logo=x&logoColor=white)](https://x.com/cs_faizan)
